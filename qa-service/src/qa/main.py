@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 
-from .api import qa_router, health_router, kb_router
+from .api import qa_router, health_router, holiday_router, kb_router
 from .kb.embedding import get_embedding_model
 from .llm import get_llm_pool
 
@@ -131,6 +131,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(qa_router)
+    app.include_router(holiday_router)
     app.include_router(kb_router)
 
     return app

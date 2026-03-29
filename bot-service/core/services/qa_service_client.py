@@ -145,3 +145,43 @@ class QAServiceClient:
             raise last_error
 
         raise QAServiceError("Failed to get answer after all retries")
+
+    def generate_holiday_greeting(
+        self,
+        holiday_name: str,
+        holiday_type: str | None = None,
+        recipient_name: str | None = None,
+        style: str = "дружелюбный",
+        max_length: int = 300,
+    ) -> str:
+        """Запрашивает у QA-сервиса короткое поздравление с праздником.
+
+        Args:
+            holiday_name: Название праздника.
+            holiday_type: Тип праздника.
+            recipient_name: Имя получателя.
+            style: Желаемый стиль поздравления.
+            max_length: Ограничение длины текста.
+
+        Returns:
+            str: Готовый текст поздравления.
+        """
+
+        try:
+            response = self._client.post(
+                "/qa/holiday",
+                json={
+                    "holiday_name": holiday_name,
+                    "holiday_type": holiday_type,
+                    "recipient_name": recipient_name,
+                    "style": style,
+                    "max_length": max_length,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return payload["message"]
+        except Exception as exc:
+            raise QAServiceError(
+                f"Failed to generate holiday greeting: {exc}"
+            ) from exc

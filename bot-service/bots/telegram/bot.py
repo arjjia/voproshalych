@@ -213,7 +213,7 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
     @dispatcher.callback_query()
     async def handle_callback(callback: CallbackQuery) -> None:
-        """Подтверждает callback без выполнения действий.
+        """Проксирует callback в core и выполняет действия.
 
         Args:
             callback: Callback-событие Telegram.
@@ -240,8 +240,11 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
                 )
 
             if action.get("text"):
-                await callback.answer(action["text"])
-                return
+                if callback.message:
+                    await callback.message.answer(action["text"])
+                else:
+                    await callback.answer(action["text"])
+                    return
 
         await callback.answer()
 

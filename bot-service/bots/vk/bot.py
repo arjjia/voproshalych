@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
@@ -65,6 +66,21 @@ class CoreClient:
 
         payload = self._build_payload(message)
         response = await self._client.post("/messages", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def process_callback(self, event: GroupTypes.MessageEvent) -> dict[str, Any]:
+        """Отправляет callback VK в core-сервис.
+
+        Args:
+            event: Callback-событие VK.
+
+        Returns:
+            dict[str, Any]: JSON-ответ от core-сервиса.
+        """
+
+        payload = build_callback_payload(event)
+        response = await self._client.post("/callbacks", json=payload)
         response.raise_for_status()
         return response.json()
 
@@ -144,17 +160,74 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
     @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=GroupTypes.MessageEvent)
     async def handle_callback(event: GroupTypes.MessageEvent) -> None:
-        """Подтверждает callback inline-кнопок без бизнес-действий.
+        """Проксирует callback VK в core и подтверждает результат.
 
         Args:
             event: Callback-событие VK.
         """
 
-        await bot.api.messages.send_message_event_answer(
-            event_id=event.event_id,
-            user_id=event.user_id,
-            peer_id=event.peer_id,
+        event_id = extract_event_field(event, "event_id")
+        user_id = extract_event_field(event, "user_id")
+        peer_id = extract_event_field(event, "peer_id")
+
+        if event_id is None or user_id is None or peer_id is None:
+            logging.error("VK callback event is missing required identifiers")
+            return
+
+        try:
+            bot_response = await core_client.process_callback(event)
+        except httpx.HTTPError:
+            logging.exception("Не удалось обработать callback VK через core")
+            await bot.api.messages.send_message_event_answer(
+                event_id=event_id,
+                user_id=user_id,
+                peer_id=peer_id,
+                event_data=json.dumps(
+                    {
+                        "type": "show_snackbar",
+                        "text": "Сервис временно недоступен.",
+                    }
+                ),
+            )
+            return
+
+        for action in bot_response.get("actions", []):
+            if action.get("type") != "send_text" or not action.get("text"):
+                continue
+
+            try:
+                await bot.api.messages.send(
+                    peer_id=peer_id,
+                    random_id=random.randint(1, 2_147_483_647),
+                    message=action["text"],
+                    keyboard=build_inline_keyboard(action.get("buttons", [])),
+                )
+            except Exception:
+                logging.exception("Не удалось отправить callback-ответ VK пользователю")
+                return
+
+        snackbar_text = next(
+            (
+                action.get("text")
+                for action in bot_response.get("actions", [])
+                if action.get("text")
+            ),
+            "Готово",
         )
+        try:
+            await bot.api.messages.send_message_event_answer(
+                event_id=event_id,
+                user_id=user_id,
+                peer_id=peer_id,
+                event_data=json.dumps(
+                    {
+                        "type": "show_snackbar",
+                        "text": snackbar_text[:90],
+                    }
+                ),
+            )
+        except Exception:
+            logging.exception("Не удалось подтвердить callback VK через snackbar")
 
     return bot
 
@@ -183,6 +256,67 @@ def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None
             )
 
     return keyboard.get_json()
+
+
+def extract_event_field(event: GroupTypes.MessageEvent, field_name: str) -> Any:
+    """Безопасно извлекает поле из VK callback event.
+
+    Args:
+        event: Callback-событие VK.
+        field_name: Имя поля.
+
+    Returns:
+        Any: Значение поля или `None`.
+    """
+
+    if hasattr(event, field_name):
+        return getattr(event, field_name)
+
+    event_object = getattr(event, "object", None)
+    if event_object is not None and hasattr(event_object, field_name):
+        return getattr(event_object, field_name)
+
+    return None
+
+
+def build_callback_payload(event: GroupTypes.MessageEvent) -> dict[str, Any]:
+    """Преобразует callback VK в общий контракт core.
+
+    Args:
+        event: Callback-событие VK.
+
+    Returns:
+        dict[str, Any]: JSON-полезная нагрузка для `POST /callbacks`.
+    """
+
+    raw_payload = extract_event_field(event, "payload") or {}
+    if isinstance(raw_payload, str):
+        try:
+            raw_payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            raw_payload = {"command": raw_payload}
+
+    callback_data = ""
+    if isinstance(raw_payload, dict):
+        callback_data = str(raw_payload.get("command", ""))
+
+    conversation_message_id = extract_event_field(event, "conversation_message_id")
+    peer_id = extract_event_field(event, "peer_id")
+    user_id = extract_event_field(event, "user_id")
+
+    return {
+        "platform": "vk",
+        "user_id": str(user_id),
+        "chat_id": str(peer_id),
+        "callback_data": callback_data,
+        "message_id": str(conversation_message_id)
+        if conversation_message_id is not None
+        else None,
+        "metadata": {
+            "peer_id": peer_id,
+            "event_id": extract_event_field(event, "event_id"),
+        },
+    }
 
 
 def detect_message_type(message: Message) -> str:

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ type Settings struct {
 	MaxBotToken               string
 	BotCoreURL                string
 	BotCoreTimeoutSeconds     time.Duration
+	InternalPort              string
 	RequestDelayAfterFailures time.Duration
 }
 
@@ -36,6 +38,16 @@ type IncomingMessage struct {
 	MessageID   string         `json:"message_id,omitempty"`
 	Timestamp   string         `json:"timestamp,omitempty"`
 	Metadata    map[string]any `json:"metadata"`
+}
+
+// CallbackEvent описывает JSON-контракт callback-события для core.
+type CallbackEvent struct {
+	Platform     string         `json:"platform"`
+	UserID       string         `json:"user_id"`
+	ChatID       string         `json:"chat_id"`
+	CallbackData string         `json:"callback_data"`
+	MessageID    string         `json:"message_id,omitempty"`
+	Metadata     map[string]any `json:"metadata"`
 }
 
 // OutgoingAction описывает действие, которое должен выполнить адаптер.
@@ -57,6 +69,13 @@ type InlineButton struct {
 	CallbackData string `json:"callback_data"`
 }
 
+// InternalSendRequest описывает внутренний запрос на отправку сообщения через MAX-адаптер.
+type InternalSendRequest struct {
+	UserID string `json:"user_id,omitempty"`
+	ChatID string `json:"chat_id,omitempty"`
+	Text   string `json:"text"`
+}
+
 // CoreClient отправляет нормализованные сообщения в общий core.
 type CoreClient struct {
 	baseURL string
@@ -76,6 +95,7 @@ func NewSettings() Settings {
 		MaxBotToken:               os.Getenv("MAX_BOT_TOKEN"),
 		BotCoreURL:                valueOrDefault(os.Getenv("BOT_CORE_URL"), "http://127.0.0.1:8000"),
 		BotCoreTimeoutSeconds:     timeoutSeconds,
+		InternalPort:              valueOrDefault(os.Getenv("MAX_BOT_INTERNAL_PORT"), "8081"),
 		RequestDelayAfterFailures: 2 * time.Second,
 	}
 }
@@ -132,6 +152,48 @@ func (c *CoreClient) ProcessMessage(ctx context.Context, payload IncomingMessage
 	return botResponse, nil
 }
 
+// ProcessCallback отправляет callback-событие в core и возвращает список действий.
+func (c *CoreClient) ProcessCallback(ctx context.Context, payload CallbackEvent) (BotResponse, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return BotResponse{}, fmt.Errorf("не удалось сериализовать callback в core: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/callbacks",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return BotResponse{}, fmt.Errorf("не удалось создать callback запрос в core: %w", err)
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := c.client.Do(request)
+	if err != nil {
+		return BotResponse{}, fmt.Errorf("не удалось отправить callback в core: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusBadRequest {
+		responseBody, _ := io.ReadAll(response.Body)
+		return BotResponse{}, fmt.Errorf(
+			"core вернул статус %d для callback: %s",
+			response.StatusCode,
+			string(responseBody),
+		)
+	}
+
+	var botResponse BotResponse
+	if err := json.NewDecoder(response.Body).Decode(&botResponse); err != nil {
+		return BotResponse{}, fmt.Errorf("не удалось разобрать callback ответ core: %w", err)
+	}
+
+	return botResponse, nil
+}
+
 func main() {
 	settings := NewSettings()
 	if settings.MaxBotToken == "" {
@@ -148,6 +210,15 @@ func main() {
 
 	coreClient := NewCoreClient(settings)
 
+	server := startInternalServer(ctx, settings, api)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("ошибка остановки internal MAX server: %v", err)
+		}
+	}()
+
 	for update := range api.GetUpdates(ctx) {
 		if err := handleUpdate(ctx, api, coreClient, update); err != nil {
 			log.Printf("ошибка обработки MAX update: %v", err)
@@ -163,8 +234,8 @@ func handleUpdate(
 	coreClient *CoreClient,
 	update any,
 ) error {
-	if _, ok := update.(*schemes.MessageCallbackUpdate); ok {
-		return nil
+	if callbackUpdate, ok := update.(*schemes.MessageCallbackUpdate); ok {
+		return handleCallbackUpdate(ctx, api, coreClient, callbackUpdate)
 	}
 
 	messageUpdate, ok := update.(*schemes.MessageCreatedUpdate)
@@ -190,21 +261,57 @@ func handleUpdate(
 			continue
 		}
 
-		message := maxbot.NewMessage()
-		message.SetText(action.Text)
-		addKeyboardToMessage(message, action.Buttons)
-
+		var chatID int64
+		var userID int64
 		switch {
 		case messageUpdate.Message.Recipient.ChatId != 0:
-			message.SetChat(messageUpdate.Message.Recipient.ChatId)
+			chatID = messageUpdate.Message.Recipient.ChatId
 		case messageUpdate.Message.Sender.UserId != 0:
-			message.SetUser(messageUpdate.Message.Sender.UserId)
+			userID = messageUpdate.Message.Sender.UserId
 		default:
 			return fmt.Errorf("в MAX update нет chat_id и user_id для ответа")
 		}
 
-		if err := api.Messages.Send(ctx, message); err != nil {
+		if err := sendMessage(ctx, api, userID, chatID, action.Text, action.Buttons); err != nil {
 			return fmt.Errorf("не удалось отправить ответ в MAX: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func handleCallbackUpdate(
+	ctx context.Context,
+	api *maxbot.Api,
+	coreClient *CoreClient,
+	update *schemes.MessageCallbackUpdate,
+) error {
+	callbackEvent, err := buildCallbackEvent(update)
+	if err != nil {
+		return err
+	}
+
+	response, err := coreClient.ProcessCallback(ctx, callbackEvent)
+	if err != nil {
+		return err
+	}
+
+	userID, err := parseOptionalInt64(callbackEvent.UserID)
+	if err != nil {
+		return err
+	}
+	chatID, err := parseOptionalInt64(callbackEvent.ChatID)
+	if err != nil {
+		return err
+	}
+
+	for _, action := range response.Actions {
+		if action.Type != "send_text" || action.Text == "" {
+			continue
+		}
+
+		if err := sendMessage(ctx, api, userID, chatID, action.Text, action.Buttons); err != nil {
+			return fmt.Errorf("не удалось отправить callback ответ в MAX: %w", err)
 		}
 	}
 
@@ -251,28 +358,230 @@ func buildIncomingMessage(update *schemes.MessageCreatedUpdate) (IncomingMessage
 	return incoming, nil
 }
 
+// buildCallbackEvent нормализует MAX callback update к контракту core.
+func buildCallbackEvent(update *schemes.MessageCallbackUpdate) (CallbackEvent, error) {
+	rawUpdate, err := json.Marshal(update)
+	if err != nil {
+		return CallbackEvent{}, fmt.Errorf("не удалось сериализовать MAX callback update: %w", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rawUpdate, &payload); err != nil {
+		return CallbackEvent{}, fmt.Errorf("не удалось разобрать MAX callback update: %w", err)
+	}
+
+	callbackMap, _ := payload["callback"].(map[string]any)
+	messageMap, _ := payload["message"].(map[string]any)
+	recipientMap, _ := messageMap["recipient"].(map[string]any)
+	bodyMap, _ := messageMap["body"].(map[string]any)
+	userMap, _ := callbackMap["user"].(map[string]any)
+
+	userID := extractNumericString(userMap["user_id"])
+	chatID := extractNumericString(recipientMap["chat_id"])
+	if chatID == "" {
+		chatID = extractNumericString(recipientMap["user_id"])
+	}
+
+	callbackData := extractString(callbackMap["payload"])
+	messageID := extractString(bodyMap["mid"])
+	if userID == "" || chatID == "" || callbackData == "" {
+		return CallbackEvent{}, fmt.Errorf("в MAX callback update не хватает user_id, chat_id или callback_data")
+	}
+
+	return CallbackEvent{
+		Platform:     "max",
+		UserID:       userID,
+		ChatID:       chatID,
+		CallbackData: callbackData,
+		MessageID:    messageID,
+		Metadata: map[string]any{
+			"callback_id": callbackMap["callback_id"],
+		},
+	}, nil
+}
+
 // sendFallbackMessage отправляет короткий ответ, если core временно недоступен.
 func sendFallbackMessage(
 	ctx context.Context,
 	api *maxbot.Api,
 	update *schemes.MessageCreatedUpdate,
 ) error {
-	message := maxbot.NewMessage().SetText("Сервис временно недоступен.")
-
+	var chatID int64
+	var userID int64
 	switch {
 	case update.Message.Recipient.ChatId != 0:
-		message.SetChat(update.Message.Recipient.ChatId)
+		chatID = update.Message.Recipient.ChatId
 	case update.Message.Sender.UserId != 0:
-		message.SetUser(update.Message.Sender.UserId)
+		userID = update.Message.Sender.UserId
 	default:
 		return fmt.Errorf("некуда отправить fallback-сообщение MAX")
 	}
 
-	if err := api.Messages.Send(ctx, message); err != nil {
+	if err := sendMessage(ctx, api, userID, chatID, "Сервис временно недоступен.", nil); err != nil {
 		return fmt.Errorf("не удалось отправить fallback-сообщение MAX: %w", err)
 	}
 
 	return nil
+}
+
+func sendMessage(
+	ctx context.Context,
+	api *maxbot.Api,
+	userID int64,
+	chatID int64,
+	text string,
+	buttons [][]InlineButton,
+) error {
+	if text == "" {
+		return fmt.Errorf("пустой текст сообщения для отправки")
+	}
+
+	message := maxbot.NewMessage()
+	message.SetText(text)
+	addKeyboardToMessage(message, buttons)
+
+	switch {
+	case chatID != 0:
+		message.SetChat(chatID)
+	case userID != 0:
+		message.SetUser(userID)
+	default:
+		return fmt.Errorf("не указан chat_id или user_id для отправки")
+	}
+
+	if err := api.Messages.Send(ctx, message); err != nil {
+		return err
+	}
+	return nil
+}
+
+func startInternalServer(ctx context.Context, settings Settings, api *maxbot.Api) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/internal/send", func(writer http.ResponseWriter, request *http.Request) {
+		handleInternalSend(writer, request, api)
+	})
+
+	server := &http.Server{
+		Addr:    ":" + settings.InternalPort,
+		Handler: mux,
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("ошибка остановки internal MAX server: %v", err)
+		}
+	}()
+
+	go func() {
+		log.Printf("internal MAX server started on :%s", settings.InternalPort)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("ошибка запуска internal MAX server: %v", err)
+		}
+	}()
+
+	return server
+}
+
+func handleInternalSend(
+	writer http.ResponseWriter,
+	request *http.Request,
+	api *maxbot.Api,
+) {
+	if request.Method != http.MethodPost {
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload InternalSendRequest
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		http.Error(writer, "invalid json body", http.StatusBadRequest)
+		return
+	}
+
+	var userID int64
+	var chatID int64
+	var err error
+
+	if payload.UserID != "" {
+		userID, err = strconv.ParseInt(payload.UserID, 10, 64)
+		if err != nil {
+			http.Error(writer, "invalid user_id", http.StatusBadRequest)
+			return
+		}
+	}
+	if payload.ChatID != "" {
+		chatID, err = strconv.ParseInt(payload.ChatID, 10, 64)
+		if err != nil {
+			http.Error(writer, "invalid chat_id", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if payload.Text == "" {
+		http.Error(writer, "text is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := sendMessage(request.Context(), api, userID, chatID, payload.Text, nil); err != nil {
+		http.Error(writer, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	writer.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(writer).Encode(map[string]any{
+		"ok": true,
+	})
+}
+
+func parseOptionalInt64(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("не удалось преобразовать значение %q в int64: %w", value, err)
+	}
+	return parsed, nil
+}
+
+func extractNumericString(value any) string {
+	switch typed := value.(type) {
+	case float64:
+		return fmt.Sprintf("%.0f", typed)
+	case int64:
+		return fmt.Sprintf("%d", typed)
+	case int:
+		return fmt.Sprintf("%d", typed)
+	case json.Number:
+		return typed.String()
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func extractString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		if typed == nil {
+			return ""
+		}
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		var asString string
+		if err := json.Unmarshal(raw, &asString); err == nil {
+			return asString
+		}
+		return string(raw)
+	}
 }
 
 func valueOrDefault(value string, defaultValue string) string {

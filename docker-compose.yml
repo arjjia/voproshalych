@@ -53,6 +53,9 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     healthcheck:
       test:
         [
@@ -76,6 +79,7 @@ services:
     environment:
       BOT_CORE_APP_NAME: ${BOT_CORE_APP_NAME:-bot-core}
       BOT_CORE_APP_VERSION: ${BOT_CORE_APP_VERSION:-0.1.0}
+      MAX_BOT_INTERNAL_URL: ${MAX_BOT_INTERNAL_URL:-http://max-bot:8081}
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
       POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
@@ -101,6 +105,9 @@ services:
         condition: service_completed_successfully
       qa-service:
         condition: service_healthy
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
 
   telegram-bot:
     build:
@@ -113,6 +120,9 @@ services:
       BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
       BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       bot-core:
         condition: service_healthy
@@ -128,6 +138,9 @@ services:
       BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
       BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
       VK_BOT_TOKEN: ${VK_BOT_TOKEN}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       bot-core:
         condition: service_healthy
@@ -142,7 +155,11 @@ services:
     environment:
       BOT_CORE_URL: ${BOT_CORE_URL:-http://bot-core:8000}
       BOT_CORE_TIMEOUT_SECONDS: ${BOT_CORE_TIMEOUT_SECONDS:-10}
+      MAX_BOT_INTERNAL_PORT: ${MAX_BOT_INTERNAL_PORT:-8081}
       MAX_BOT_TOKEN: ${MAX_BOT_TOKEN}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       bot-core:
         condition: service_healthy

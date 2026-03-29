@@ -5,8 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -83,6 +85,59 @@ class Subscription(Base):
     )
 
 
+class DialogSession(Base):
+    """Сессия диалога пользователя."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=True,
+    )
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=True,
+    )
+
+
+class DialogMessage(Base):
+    """Сообщение внутри пользовательской сессии."""
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(10), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    model_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    used_chunk_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=True,
+    )
+
+
+class QuestionAnswerLink(Base):
+    """Связка вопроса пользователя и ответа бота."""
+
+    __tablename__ = "questions_answers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), nullable=False)
+    answer_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=True,
+    )
+
+
 class Holiday(Base):
     """Праздник из таблицы holidays."""
 
@@ -97,6 +152,23 @@ class Holiday(Base):
     male_holiday: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     female_holiday: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     template_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TelemetryLog(Base):
+    """Технический лог для внутренних фоновых процессов."""
+
+    __tablename__ = "telemetry_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=True,
+    )
+    level: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    service: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 def get_session() -> Session:
