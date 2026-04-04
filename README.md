@@ -111,47 +111,7 @@ LIGHT_RAG_USE_PG_GRAPH=true
 |----------|----------|
 | `GET /health` | Health check всех сервисов |
 
-## Полезные команды
-
-### Тест QA с LightRAG
-```bash
-curl -X POST http://localhost:8004/qa \
-  -H "Content-Type: application/json" \
-  -d '{"question":"Какие правила приема в магистратуру?"}'
-```
-
-### Импорт чанков в LightRAG
-```bash
-curl -X POST http://localhost:8004/kb/import-to-lightrag
-```
-
-### Статус индекса
-```bash
-curl http://localhost:8004/kb/index-status
-```
-
-### История версий
-```bash
-curl http://localhost:8004/kb/index-versions
-```
-
 ## Тестирование QA-сервиса
-
-### Режимы работы RAG
-
-| Режим | Эндпоинт | Описание |
-|-------|----------|----------|
-| Mixed (LightRAG + fallback) | `POST /qa` | LightRAG первично, при ошибке → Classic RAG |
-| LightRAG only | `POST /qa/lightrag` | Только LightRAG |
-| Classic RAG only | `POST /qa/classic` | Только классический RAG с pgvector |
-
-### Переменные окружения для управления
-
-| Переменная | Значение | Описание |
-|------------|----------|----------|
-| `USE_LIGHT_RAG` | `true`/`false` | Включить LightRAG (для импорта) |
-| `LIGHT_RAG_USE_PG_GRAPH` | `true` | Использовать PostgreSQL для графа знаний |
-| `LIGHT_RAG_MODEL_NAME` | `deepvk-user-bge-m3` | Модель эмбеддингов |
 
 ### Тестирование LightRAG
 
@@ -199,25 +159,108 @@ docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
   "SELECT source_type, COUNT(*) FROM chunks GROUP BY source_type;"
 ```
 
-### Тестированиеfallback логики
+### Импорт чанков в LightRAG и построение графа знаний
+
+```bash
+# 1. Импорт чанков в LightRAG (включает KG extraction)
+curl -X POST http://localhost:8004/kb/import-to-lightrag
+
+# 2. Проверить статус импорта
+curl http://localhost:8004/kb/index-status
+
+# 3. Ручное построение графа знаний (только KG, без переиндексации)
+curl -X POST http://localhost:8004/kb/rebuild-knowledge-graph
+
+# 4. Проверить количество сущностей в VDB
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT COUNT(*) FROM lightrag_vdb_entity_deepvk_user_bge_m3_1024d;"
+
+# 5. Проверить количество связей в VDB
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT COUNT(*) FROM lightrag_vdb_relation_deepvk_user_bge_m3_1024d;"
+
+# 6. Проверить полные сущности KG (извлечённые из документов)
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT COUNT(*) FROM lightrag_full_entities;"
+
+# 7. Проверить полные связи KG
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT COUNT(*) FROM lightrag_full_relations;"
+```
+
+### Очистка данных LightRAG
+
+```bash
+# Удалить все данные LightRAG (при необходимости пересоздать с нуля)
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "
+  TRUNCATE lightrag_doc_chunks, lightrag_doc_full, lightrag_doc_registry, 
+           lightrag_doc_status, lightrag_entity_chunks, lightrag_full_entities, 
+           lightrag_full_relations, lightrag_index_versions, lightrag_llm_cache, 
+           lightrag_relation_chunks, lightrag_vdb_chunks_deepvk_user_bge_m3_1024d,
+           lightrag_vdb_entity_deepvk_user_bge_m3_1024d, 
+           lightrag_vdb_relation_deepvk_user_bge_m3_1024d 
+  RESTART IDENTITY CASCADE;
+"
+```
+
+### Тестирование fallback логики
 
 ```bash
 # Основной /qa endpoint автоматически использует fallback
-# При LightRAG ошибке →Classic RAG
+# При LightRAG ошибке → Classic RAG
 # Логи можно посмотреть:
 docker compose logs qa-service | grep -i "fallback"
 ```
 
-### Полный чеклист тестирования
+### Таблицы PostgreSQL
 
-- [ ] `docker compose up -d --build` — запуск всех сервисов
-- [ ] `docker compose ps` — проверить что все сервисы healthy
-- [ ] `curl http://localhost:8004/health` — health check
-- [ ] `curl -X POST http://localhost:8004/qa -d '{"question":"..."}'` — mixed mode
-- [ ] `curl -X POST http://localhost:8004/qa/lightrag -d '{"question":"..."}'` — LightRAG only
-- [ ] `curl -X POST http://localhost:8004/qa/classic -d '{"question":"..."}'` — Classic RAG only
-- [ ] `curl http://localhost:8004/kb/chunks/count` — проверить наполнение БЗ
-- [ ] `curl http://localhost:8004/kb/index-status` — проверить статус LightRAG
+#### Основные таблицы приложения
+
+| Таблица | Описание |
+|---------|----------|
+| `users` | Пользователи бота |
+| `sessions` | Сессии пользователей |
+| `messages` | Сообщения пользователей |
+| `questions_answers` | История вопросов-ответов |
+| `subscriptions` | Подписки пользователей |
+| `holidays` | Праздники для рассылок |
+| `telemetry_logs` | Логи телеметрии |
+| `agent_traces` | Трассировка агентов |
+| `alembic_version` | Версии миграций БД |
+
+#### База знаний (chunks)
+
+| Таблица | Описание |
+|---------|----------|
+| `chunks` | Чанки документов |
+| `embeddings` | Эмбеддинги чанков |
+
+#### LightRAG
+
+| Таблица | Описание |
+|---------|----------|
+| `lightrag_vdb_chunks_*` | Документы в векторном хранилище |
+| `lightrag_vdb_entity_*` | Сущности графа знаний |
+| `lightrag_vdb_relation_*` | Связи графа знаний |
+| `lightrag_full_entities` | Полные извлечённые сущности |
+| `lightrag_full_relations` | Полные извлечённые связи |
+| `lightrag_doc_registry` | Реестр документов |
+| `lightrag_doc_chunks` | Чанки документов |
+| `lightrag_doc_full` | Полные документы |
+| `lightrag_index_versions` | Версии индекса |
+| `lightrag_llm_cache` | Кэш LLM ответов |
+
+#### Расширения PostgreSQL
+
+| Расширение | Описание |
+|------------|----------|
+| `vector` | Векторный поиск (pgvector) |
+| `age` | Графовый движок (Apache AGE) |
+| `plpgsql` | Процедурный язык |
+| `uuid-ossp` | Генератор UUID |
+| `pg_trgm` | Trigram поиск |
+| `fuzzystrmatch` | Нечёткий поиск |
+| `unaccent` | Удаление акцентов |
 
 ## Документация
 
