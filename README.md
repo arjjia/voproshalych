@@ -135,6 +135,90 @@ curl http://localhost:8004/kb/index-status
 curl http://localhost:8004/kb/index-versions
 ```
 
+## Тестирование QA-сервиса
+
+### Режимы работы RAG
+
+| Режим | Эндпоинт | Описание |
+|-------|----------|----------|
+| Mixed (LightRAG + fallback) | `POST /qa` | LightRAG первично, при ошибке → Classic RAG |
+| LightRAG only | `POST /qa/lightrag` | Только LightRAG |
+| Classic RAG only | `POST /qa/classic` | Только классический RAG с pgvector |
+
+### Переменные окружения для управления
+
+| Переменная | Значение | Описание |
+|------------|----------|----------|
+| `USE_LIGHT_RAG` | `true`/`false` | Включить LightRAG (для импорта) |
+| `LIGHT_RAG_USE_PG_GRAPH` | `true` | Использовать PostgreSQL для графа знаний |
+| `LIGHT_RAG_MODEL_NAME` | `deepvk-user-bge-m3` | Модель эмбеддингов |
+
+### Тестирование LightRAG
+
+```bash
+# 1. Проверить статус сервисов
+docker compose ps
+
+# 2. Health check
+curl http://localhost:8004/health
+
+# 3. Проверить расширения PostgreSQL
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT * FROM pg_extension WHERE extname IN ('vector', 'age');"
+
+# 4. Тест LightRAG (mix mode с fallback)
+curl -X POST http://localhost:8004/qa \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Какие правила приема в магистратуру?"}'
+
+# 5. Тест только LightRAG (без fallback)
+curl -X POST http://localhost:8004/qa/lightrag \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Какие специальности есть в ТюмГУ?"}'
+
+# 6. Проверить статус индекса
+curl http://localhost:8004/kb/index-status
+
+# 7. Проверить количество чанков
+curl http://localhost:8004/kb/chunks/count
+
+# 8. История версий индекса
+curl http://localhost:8004/kb/index-versions
+```
+
+### Тестирование Classic RAG
+
+```bash
+# Тест только Classic RAG (без LightRAG)
+curl -X POST http://localhost:8004/qa/classic \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Как получить справку об обучении?"}'
+
+# Проверить количество чанков в БД
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT source_type, COUNT(*) FROM chunks GROUP BY source_type;"
+```
+
+### Тестированиеfallback логики
+
+```bash
+# Основной /qa endpoint автоматически использует fallback
+# При LightRAG ошибке →Classic RAG
+# Логи можно посмотреть:
+docker compose logs qa-service | grep -i "fallback"
+```
+
+### Полный чеклист тестирования
+
+- [ ] `docker compose up -d --build` — запуск всех сервисов
+- [ ] `docker compose ps` — проверить что все сервисы healthy
+- [ ] `curl http://localhost:8004/health` — health check
+- [ ] `curl -X POST http://localhost:8004/qa -d '{"question":"..."}'` — mixed mode
+- [ ] `curl -X POST http://localhost:8004/qa/lightrag -d '{"question":"..."}'` — LightRAG only
+- [ ] `curl -X POST http://localhost:8004/qa/classic -d '{"question":"..."}'` — Classic RAG only
+- [ ] `curl http://localhost:8004/kb/chunks/count` — проверить наполнение БЗ
+- [ ] `curl http://localhost:8004/kb/index-status` — проверить статус LightRAG
+
 ## Документация
 
 - `docs/pipeline-user-query.md` — Пайплайн обработки запроса

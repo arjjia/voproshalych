@@ -6,228 +6,302 @@
 
 ---
 
-### Mermaid диаграмма: полный сценарий вопроса
+### Mermaid диаграмма: полный сценарий вопроса (v2 - детальная)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    
     participant User as Пользователь
-    participant Platform as Платформа<br/>(Telegram/VK/MAX API)
-    participant Adapter as Platform Adapter<br/>(bots/telegram/bot.py)
-    participant CoreClient as CoreClient<br/>(httpx)
-    participant Core as bot-core<br/>(FastAPI)
-    participant BotService as BotService<br/>(services/bot_service.py)
-    participant UserService as UserService<br/>(services/user_service.py)
-    participant QAClient as QAServiceClient<br/>(services/qa_service_client.py)
-    participant QA as qa-service<br/>(FastAPI)
-    participant LightRAG as LightRAG<br/>(lightrag.py)
-    participant Embedding as Embedding<br/>(kb/embedding.py)
-    participant PGVector as PGVectorStorage<br/>(vectors)
-    participant PGGraph as PGGraphStorage<br/>(knowledge graph)
-    participant ClassicSearch as Classic Search<br/>(kb/search.py)
-    participant LLMPool as LLM Pool<br/>(llm/pool.py)
-    participant Mistral as Mistral<br/>(API)
-    participant GigaChat as GigaChat<br/>(API)
-    participant OpenRouter as OpenRouter<br/>(API)
-    participant DB_Postgres as PostgreSQL<br/>(pgvector + AGE)
-    participant PlatformOut as Platform API
-    participant UserResult as Пользователь
+    participant TelegramAPI as Telegram API
+    participant BotCore as bot-core<br/>(FastAPI)
+    participant QAService as qa-service<br/>(FastAPI)
+    participant Postgres as PostgreSQL<br/>(pgvector + AGE)
+    participant MistralAPI as Mistral API
+    participant GigaChatAPI as GigaChat API
+    participant OpenRouterAPI as OpenRouter API
 
-    %% ЭТАП 1: Отправка вопроса
-    Note over User,Platform: === ЭТАП 1: Пользователь отправляет вопрос ===
-    User->>Platform: 1. Текстовый вопрос<br/>("Какие правила приёма в магистратуру?")
-    Platform->>Adapter: 2. Событие Message
-
-    %% ЭТАП 2: Нормализация
-    Note over Adapter,CoreClient: === ЭТАП 2: Нормализация и отправка в Bot-Core ===
-    Adapter->>Adapter: 3. detect_message_type()<br/>(text/voice/sticker/photo...)
-    Adapter->>Adapter: 4. _build_payload() → IncomingMessage
-    rect dashed
-        Note over Adapter: IncomingMessage JSON:<br/>{platform, user_id, chat_id,<br/>text, message_type, metadata}
-    end
-    Adapter->>CoreClient: 5. POST /messages (json payload)
-    CoreClient->>Core: 6. HTTP POST /messages
-
-    %% ЭТАП 3: Bot-Core приём
-    Note over Core,BotService: === ЭТАП 3: Приём и маршрутизация ===
-    Core->>Core: 7. POST /messages endpoint<br/>(FastAPI route)
-    Core->>BotService: 8. handle_message(IncomingMessage)
-
-    %% ЭТАП 4: UserService - upsert
-    Note over BotService,DB_Postgres: === ЭТАП 4: Работа с пользователем ===
-    BotService->>UserService: 9. upsert_user(message)
-    UserService->>DB_Postgres: 10. SELECT * FROM users<br/>WHERE platform=? AND platform_user_id=?
-
-    alt Пользователь НЕ найден
-        DB_Postgres-->>UserService: 11. None
-        UserService->>DB_Postgres: 12. INSERT INTO users (...)
-        DB_Postgres-->>UserService: 13. COMMIT + user.id
-    else Пользователь найден
-        DB_Postgres-->>UserService: 14. User object
-        UserService->>DB_Postgres: 15. UPDATE users SET ...<br/>(username, first_name, last_name)
-        DB_Postgres-->>UserService: 16. COMMIT
-    end
-    UserService-->>BotService: 17. User object
-
-    %% ЭТАП 5: Маршрутизация по типу
-    Note over BotService,QAClient: === ЭТАП 5: Маршрутизация текстового сообщения ===
-    BotService->>BotService: 18. Проверка message_type
-    
-    alt message_type == "text"
-        BotService->>BotService: 19. _handle_text_message()
-        BotService->>BotService: 20. normalize_text = text.strip().lower()
+    %% ═══════════════════════════════════════════════════════════
+    %% ОБЛАСТЬ 1: Telegram Adapter (bots/telegram/bot.py)
+    %% ═══════════════════════════════════════════════════════════
+        Note over User,TelegramAPI: === ОБЛАСТЬ 1: Telegram Adapter ===
         
-        alt normalize_text == "/start"
-            BotService->>BotService: 21. _build_start_response()<br/>(приветствие + кнопки)
-        else normalize_text == "/ping"
-            BotService->>BotService: 22. reply_text = "pong"
-        else ЛЮБОЙ текст → QA
-            BotService->>QAClient: 23. ask(question)
+        User->>TelegramAPI: 1. Отправляет вопрос<br/>"Какие правила приёма?"
+        TelegramAPI->>TelegramAPI: 2. aiogram Dispatcher<br/>получает Update
+        
+        activate TelegramAPI
+        TelegramAPI->>TelegramAPI: 3. handle_message(message)<br/>(bot.py:145)
+        TelegramAPI->>TelegramAPI: 4. detect_message_type()
+        
+        alt message_type is text
+            TelegramAPI->>TelegramAPI: 5. should_show_pending_message()<br/>(bot.py:308)
+            TelegramAPI->>TelegramAPI: 6. message.answer("Ищу ответ...")<br/>(bot.py:157)
         end
         
-    else message_type == "voice"
-        BotService->>BotService: 24. _handle_voice_message()<br/>(заглушка)
-    else Другой тип
-        BotService->>BotService: 25. _build_unsupported_message_response()
-    end
+        TelegramAPI->>TelegramAPI: 7. CoreClient._build_payload()<br/>(bot.py:99)
+            Note over TelegramAPI:IncomingMessage JSON<br/>{platform, user_id, chat_id, text, message_type, metadata}
+        TelegramAPI->>TelegramAPI: 8. CoreClient.process_message()<br/>(bot.py:60)
+        TelegramAPI->>BotCore: 9. POST /messages (httpx)<br/>(bot.py:71)
+        deactivate TelegramAPI
 
-    %% ЭТАП 6: QAServiceClient → QA (с retry)
-    Note over QAClient,QA: === ЭТАП 6: Отправка в QA-Service (retry логика) ===
-    loop Retry (max 3, backoff: 1→2→4→8s)
-        QAClient->>QA: 26. POST /qa {question: "..."}
+    %% ═══════════════════════════════════════════════════════════
+    %% ОБЛАСТЬ 2: Bot-Core (core/main.py + services/)
+    %% ═══════════════════════════════════════════════════════════
+        Note over BotCore,QAService: === ОБЛАСТЬ 2: Bot-Core ===
         
-        alt Успех (200)
-            QA-->>QAClient: 27. {answer, model, sources}
-        else Ошибка (503/500/429/timeout)
-            QA--xQAClient: 28. HTTP Error
-            QAClient->>QAClient: 29. time.sleep(backoff)<br/>(exponential backoff)
-        end
-    end
-
-    %% ЭТАП 7: QA-Service → LightRAG (primary) или Classic RAG (fallback)
-    Note over QA,LightRAG: === ЭТАП 7: QA-Service обработка (LightRAG → Fallback) ===
-    QA->>QA: 30. ask_question(QARequest)
-    QA->>QA: 31. USE_LIGHT_RAG = os.getenv("USE_LIGHT_RAG")
-    
-    alt USE_LIGHT_RAG == "true"
-        Note over QA,LightRAG: --- Попытка LightRAG (timeout 20s) ---
-        QA->>LightRAG: 32. aquery(question, param=QueryParam(mode="mix"))
+        activate BotCore
+        BotCore->>BotCore: 10. process_message() endpoint<br/>(main.py:30)
+        BotCore->>BotCore: 11. BotService.handle_message()<br/>(bot_service.py:25)
         
-        rect dashed
-            Note over LightRAG: LightRAG Query Flow:<br/>1. Keyword extraction<br/>2. Vector search (PGVector)<br/>3. Graph search (PGGraph)<br/>4. Full-text search<br/>5. Merge results (ranked)
-        end
-        
-        LightRAG->>Embedding: 33. embedding_func(question)<br/>(deepvk/USER-bge-m3)
-        Embedding->>LightRAG: 34. 1024-dim vector
-        
-        LightRAG->>PGVector: 35. similarity_search(vector, top_k)
-        PGVector->>DB_Postgres: 36. SELECT ... ORDER BY vector <=> query
-        DB_Postgres-->>PGVector: 37. Top-K chunks (text, source_url)
-        PGVector-->>LightRAG: 38. vector_results
-        
-        LightRAG->>PGGraph: 39. graph_lookup(keywords)
-        PGGraph->>DB_Postgres: 40. MATCH (n)-[r]->(m)<br/>WHERE n.name IN keywords
-        DB_Postgres-->>PGGraph: 41. Graph entities + relations
-        PGGraph-->>LightRAG: 42. graph_results
-        
-        LightRAG->>LightRAG: 43. merge_and_rank(<br/>vector_results,<br/>graph_results)
-        LightRAG->>LLMPool: 44. llm_model_func(prompt + context)
-        
-        alt LightRAG успех (< 20s)
-            LLMPool-->>LightRAG: 45. LLMResponse (content)
-            LightRAG-->>QA: 46. answer_text
+            Note over BotCore,Postgres: -- Под-область: UserService --
             
-        else LightRAG timeout или ошибка
-            LightRAG--xQA: 47. TimeoutError / Exception
-            Note over QA,ClassicSearch: --- Fallback: Classic RAG (timeout 15s) ---
+            BotCore->>BotCore: 12. UserService.upsert_user()<br/>(bot_service.py:35)
+            BotCore->>Postgres: 13. SELECT * FROM users<br/>WHERE platform=? AND platform_user_id=?
             
-            QA->>ClassicSearch: 48. get_embedding(question)
-            ClassicSearch->>Embedding: 49. model.encode(text)
-            Embedding->>ClassicSearch: 50. embedding = [0.123, ...]
-            
-            ClassicSearch->>DB_Postgres: 51. SELECT ... FROM chunks c<br/>JOIN embeddings e ON c.id = e.chunk_id<br/>ORDER BY e.embedding_vector <=> :embedding<br/>LIMIT 3
-            DB_Postgres-->>ClassicSearch: 52. Top-3 chunks
-            ClassicSearch-->>QA: 53. chunks = [{text, title, source_url}, ...]
-            
-            QA->>QA: 54. build_context_from_chunks(chunks)
-            QA->>QA: 55. prompt = SYSTEM_PROMPT_WITH_CONTEXT<br/>+ context + question
-            
-            QA->>LLMPool: 56. llm_pool.call(prompt)
-        end
+            alt Пользователь НЕ найден
+                Postgres-->>BotCore: 14. None
+                BotCore->>Postgres: 15. INSERT INTO users<br/>(platform, platform_user_id, ...)
+                Postgres-->>BotCore: 16. RETURNING id
+            else Пользователь найден
+                Postgres-->>BotCore: 17. User row
+                BotCore->>Postgres: 18. UPDATE users SET<br/>username=?, first_name=?, ...
+            end
+            Postgres-->>BotCore: 19. COMMIT
         
-    else USE_LIGHT_RAG != "true"
-        Note over QA,ClassicSearch: --- Classic RAG only ---
-        QA->>ClassicSearch: 57. get_embedding(question)
-        ClassicSearch->>DB_Postgres: 58. Vector search (top_k=3)
-        DB_Postgres-->>ClassicSearch: 59. chunks
-        ClassicSearch-->>QA: 60. chunks
-        QA->>QA: 61. build_context_from_chunks(chunks)
-        QA->>LLMPool: 62. llm_pool.call(prompt)
-    end
-
-    %% ЭТАП 8: LLM Pool
-    Note over LLMPool,OpenRouter: === ЭТАП 8: LLM Pool (fallback: mistral → gigachat → openrouter) ===
-    loop По приоритету: mistral → gigachat → openrouter
-        LLMPool->>LLMPool: 63. select_model()
-        LLMPool->>LLMPool: 64. get_available_providers()
+        BotCore->>BotCore: 20. Проверка message_type<br/>(bot_service.py:37)
         
-        alt Mistral доступен
-            LLMPool->>Mistral: 65. POST /v1/chat/completions
-            Mistral-->>LLMPool: 66. {choices: [{message: {content: "..."}}]}
-        else Mistral недоступен
-            alt GigaChat доступен
-                LLMPool->>GigaChat: 67. POST /llm/v1/chat/completions
-                GigaChat-->>LLMPool: 68. Response JSON
-            else GigaChat недоступен
-                LLMPool->>OpenRouter: 69. POST /v1/chat/completions
-                OpenRouter-->>LLMPool: 70. Response JSON
+        alt message_type is text
+            BotCore->>BotCore: 21. _handle_text_message()<br/>(bot_service.py:91)
+            BotCore->>BotCore: 22. normalized = text.strip().lower()
+            
+            alt normalized is /start
+                BotCore->>BotCore: 23. _build_start_response()<br/>(bot_service.py:208)
+                BotCore->>BotCore: 24. _build_start_buttons()
+            else
+                BotCore->>BotCore: 26. _ask_qa_service()<br/>(bot_service.py:168)
+                BotCore->>QAService: 27. QAServiceClient.ask()<br/>(qa_service_client.py:56)
             end
         end
+        opt message_type is voice
+            BotCore->>BotCore: 28. _handle_voice_message()<br/>(bot_service.py:122)
+            Note over BotCore: Заглушка - скоро появится STT
+        end
+        opt unsupported message type
+            BotCore->>BotCore: 29. _build_unsupported_message_response()<br/>(bot_service.py:144)
+        end
+        deactivate BotCore
+
+    %% ═══════════════════════════════════════════════════════════
+    %% ОБЛАСТЬ 3: QAServiceClient Retry (services/qa_service_client.py)
+    %% ═══════════════════════════════════════════════════════════
+        Note over QAService,BotCore: === ОБЛАСТЬ 3: Retry Logic ===
+        
+        loop max 3 попытки (1s → 2s → 4s → 8s)
+            activate QAService
+            QAService->>QAService: 30. httpx.Client.post("/qa")<br/>(qa_service_client.py:74)
+            
+            alt Успех (200)
+                QAService-->>BotCore: 31. {answer, model, sources}<br/>(qa_service_client.py:106)
+                deactivate QAService
+            end
+            opt 503 (Unavailable)
+                QAService--xQAService: 32. HTTP 503
+                QAService->>QAService: 33. time.sleep(backoff)<br/>(qa_service_client.py:89)
+                Note over QAService: backoff increases
+            end
+            opt 500 (Internal Error)
+                QAService--xQAService: 34. HTTP 500
+                QAService->>QAService: 35. time.sleep(backoff)
+            end
+            opt 429 (Rate Limited)
+                QAService--xQAService: 36. HTTP 429
+                QAService->>QAService: 37. time.sleep(backoff * 2)<br/>(double backoff for rate limit)
+            end
+            opt Timeout
+                QAService--xQAService: 38. httpx.TimeoutException
+                QAService->>QAService: 39. time.sleep(backoff)
+            end
+        end
+        
+        alt После всех попыток - ошибка
+            QAService--xBotCore: 40. QAServiceTimeout / QAServiceUnavailable<br/>(qa_service_client.py:144)
+            BotCore->>BotCore: 41. Обработка исключения<br/>(bot_service.py:189-206)
+            BotCore->>BotCore: 42. Текст ошибки для пользователя
+        end
+
+    %% ═══════════════════════════════════════════════════════════
+    %% ОБЛАСТЬ 4: QA-Service (qa/api/routes/qa.py)
+    %% ═══════════════════════════════════════════════════════════
+        Note over QAService,Postgres: === ОБЛАСТЬ 4: QA Processing ===
+        
+        activate QAService
+        QAService->>QAService: 43. ask_question(QARequest)<br/>(qa.py:92)
+        QAService->>QAService: 44. USE_LIGHT_RAG = os.getenv("USE_LIGHT_RAG")<br/>(qa.py:100)
+        
+        alt USE_LIGHT_RAG is "true"
+            Note over QAService,MistralAPI: ═══ LightRAG Primary (20s timeout) ═══
+            
+            QAService->>QAService: 45. asyncio.wait_for(<br/>_query_lightrag(), timeout=20)<br/>(qa.py:107)
+            QAService->>QAService: 46. LightRAG.aquery(question)<br/>(qa.py:37)
+            
+                Note over QAService,MistralAPI: -- Под-область: LightRAG Query Flow --
+                
+                QAService->>QAService: 47. lightrag_adapter.llm_model_func()<br/>(lightrag_adapter.py:15)
+                QAService->>QAService: 48. lightrag_adapter._embedding_func()<br/>(lightrag_adapter.py:42)
+                QAService->>QAService: 49. get_embeddings_batch(texts)<br/>(embedding.py:45)
+                QAService->>QAService: 50. SentenceTransformer.encode()<br/>(embedding.py:41)
+                QAService->>QAService: 51. deepvk/USER-bge-m3 → 1024-dim vector
+                
+                Note over QAService,Postgres: Внутри LightRAG:<br/>1. Keyword extraction<br/>2. Vector search (PGVectorStorage)<br/>3. Graph search (PGGraphStorage)<br/>4. Full-text search<br/>5. Merge & Rank results
+                
+                QAService->>Postgres: 52. SELECT ... FROM chunks<br/>JOIN embeddings<br/>ORDER BY vector <=> query<br/>LIMIT top_k
+                Postgres-->>QAService: 53. vector_results (chunks)
+                
+                QAService->>Postgres: 54. MATCH (n)-[r]->(m)<br/>WHERE n.name IN keywords<br/>(Cypher via Apache AGE)
+                Postgres-->>QAService: 55. graph_results (entities + relations)
+                
+                QAService->>QAService: 56. merge_and_rank(<br/>vector_results, graph_results)
+            
+            QAService->>QAService: 57. llm_pool.call(prompt)<br/>(llm/pool.py:71)
+            
+            alt LightRAG успех (< 20s)
+                QAService-->>QAService: 58. LLMResponse(content)<br/>(llm/pool.py:124)
+                QAService-->>QAService: 59. QAResponse(answer, model="lightrag-mix")
+                
+            else LightRAG timeout/error
+                QAService--xQAService: 60. TimeoutError / Exception
+                Note over QAService,MistralAPI: ═══ Classic RAG Fallback (15s timeout) ═══
+                
+                QAService->>QAService: 61. asyncio.wait_for(<br/>_query_classic_rag(), timeout=15)<br/>(qa.py:128)
+                
+                    Note over QAService,MistralAPI: -- Под-область: Classic RAG --
+                    
+                    QAService->>QAService: 62. get_embedding(question)<br/>(kb/embedding.py:31)
+                    QAService->>QAService: 63. SentenceTransformer.encode(text)<br/>(kb/embedding.py:41)
+                    QAService->>Postgres: 64. SELECT ... FROM chunks c<br/>JOIN embeddings e ON c.id = e.chunk_id<br/>ORDER BY e.embedding_vector <=> :embedding<br/>LIMIT 3
+                    Postgres-->>QAService: 65. Top-3 chunks (text, title, source_url)
+                    
+                    QAService->>QAService: 66. build_context_from_chunks(chunks)<br/>(kb/search.py)
+                    QAService->>QAService: 67. SYSTEM_PROMPT_WITH_CONTEXT<br/>+ context + question<br/>(prompts.py)
+                
+                QAService->>QAService: 68. llm_pool.call(prompt)<br/>(llm/pool.py:71)
+            
+        else
+            Note over QAService,MistralAPI: Classic RAG Only (USE_LIGHT_RAG=false)
+            
+            QAService->>QAService: 69. _query_classic_rag(question)<br/>(qa.py:48)
+            QAService->>QAService: 70. get_embedding() → search_chunks()
+            QAService->>Postgres: 71. Vector search (top_k=3)
+            Postgres-->>QAService: 72. chunks
+            QAService->>QAService: 73. build_context_from_chunks() + prompt
+                QAService->>QAService: 74. llm_pool.call(prompt)
+        end
+        deactivate QAService
+
+    %% ═══════════════════════════════════════════════════════════
+    %% ОБЛАСТЬ 5: LLM Pool (llm/pool.py + providers/)
+    %% ═══════════════════════════════════════════════════════════
+        Note over MistralAPI,OpenRouterAPI: === ОБЛАСТЬ 5: LLM Pool (Fallback) ===
+        
+        QAService->>QAService: 75. llm_pool.call(prompt)<br/>(llm/pool.py:71)
+        QAService->>QAService: 76. select_model()<br/>(llm/pool.py:56)
+        QAService->>QAService: 77. get_available_providers()
+        
+            Note over QAService,MistralAPI: --- Try Mistral ---
+            
+            alt MistralProvider.is_available()
+                QAService->>QAService: 78. MistralProvider.generate()
+                QAService->>MistralAPI: 79. POST /v1/chat/completions
+                activate MistralAPI
+                MistralAPI-->>QAService: 80. Response JSON
+                deactivate MistralAPI
+                QAService-->>QAService: 81. LLMResponse
+                
+            else Mistral unavailable
+                QAService->>QAService: 82. Try GigaChat
+                Note over QAService,GigaChatAPI: --- Try GigaChat ---
+                
+                alt GigaChatProvider.is_available()
+                    QAService->>QAService: 83. GigaChatProvider.generate()
+                    QAService->>GigaChatAPI: 84. POST /llm/v1/chat/completions
+                    activate GigaChatAPI
+                    GigaChatAPI-->>QAService: 85. Response JSON
+                    deactivate GigaChatAPI
+                    QAService-->>QAService: 86. LLMResponse
+                    
+                else GigaChat unavailable
+                    QAService->>QAService: 87. Try OpenRouter
+                    Note over QAService,OpenRouterAPI: --- Try OpenRouter ---
+                    
+                    QAService->>QAService: 88. OpenRouterProvider.generate()
+                    QAService->>OpenRouterAPI: 89. POST /v1/chat/completions
+                    activate OpenRouterAPI
+                    OpenRouterAPI-->>QAService: 90. Response JSON
+                    deactivate OpenRouterAPI
+                    QAService-->>QAService: 91. LLMResponse
+                    
+                    opt All failed
+                        QAService->>QAService: 92. raise ValueError
+                    end
+                end
+            end
+
+    %% ═══════════════════════════════════════════════════════════
+    %% ОБЛАСТЬ 6: Формирование ответа и возврат
+    %% ═══════════════════════════════════════════════════════════
+        Note over BotCore,TelegramAPI: === ОБЛАСТЬ 6: Response Formation ===
+        
+        QAService->>QAService: 96. Формирование QAResponse<br/>(qa.py:81-85)
+            alt chunks найдены
+                QAService->>QAService: 97. sources = [c.source_url for c in chunks]
+            else
+                QAService->>QAService: 98. sources = []
+            end
+        QAService-->>BotCore: 99. QAResponse {answer, model, sources}<br/>(qa.py:75)
+        
+        BotCore->>BotCore: 100. Обработка ответа<br/>(bot_service.py:110)
+        BotCore->>BotCore: 101. _build_feedback_buttons()<br/>(bot_service.py:263)
+            Note over BotCore: Создание кнопок
+        BotCore->>BotCore: 102. BotResponse(actions=[OutgoingAction(...)])
+        BotCore-->>TelegramAPI: 103. BotResponse JSON<br/>(main.py:42)
+        activate TelegramAPI
+        TelegramAPI->>TelegramAPI: 104. handle_message() получает ответ<br/>(bot.py:207)
+        TelegramAPI->>TelegramAPI: 105. build_inline_keyboard(buttons)<br/>(bot.py:251)
+        TelegramAPI->>TelegramAPI: 106. message.answer(text, reply_markup)<br/>(bot.py:209)
+        
+        alt Было pending message
+            TelegramAPI->>TelegramAPI: 107. delete_message_safely(pending)<br/>(bot.py:325)
+        end
+        
+        TelegramAPI->>TelegramAPI: 108. Bot.send_message() → Telegram API<br/>(aiogram Bot)
+        TelegramAPI->>User: 109. Пользователь получает ответ<br/>+ кнопки 👍/👎
+        deactivate TelegramAPI
+
+    %% ═══════════════════════════════════════════════════════════
+    %% АЛЬТЕРНАТИВНЫЕ ПУТИ И ОБРАБОТКА ОШИБОК
+    %% ═══════════════════════════════════════════════════════════
+    Note over BotCore: Обработка ошибок QA сервиса
+    opt QAServiceTimeout
+        BotCore->>BotCore: 110. "Поиск ответа занимает дольше..."<br/>(bot_service.py:191)
     end
-    
-    LLMPool-->>QA: 71. LLMResponse(content, model, usage)
-
-    %% ЭТАП 9: Формирование QAResponse
-    Note over QA,QAClient: === ЭТАП 9: Формирование ответа ===
-    QA->>QA: 72. Формирование QAResponse
-    alt chunks найдены
-        QA->>QA: 73. sources = [c.source_url for c in chunks]
-    else
-        QA->>QA: 74. sources = []
+    opt QAServiceUnavailable
+        BotCore->>BotCore: 111. "Сервис временно недоступен..."<br/>(bot_service.py:197)
     end
-    QA-->>QAClient: 75. QAResponse {answer, model, sources}
-
-    %% ЭТАП 10: Возврат в Bot-Service
-    Note over QAClient,BotService: === ЭТАП 10: Возврат ответа ===
-    QAClient-->>BotService: 76. reply_text = answer
-
-    %% ЭТАП 11: BotResponse
-    Note over BotService,PlatformOut: === ЭТАП 11: Формирование BotResponse ===
-    BotService->>BotService: 77. _build_feedback_buttons()<br/>(["👍", "👎"])
-    BotService->>BotService: 78. BotResponse(actions=[<br/>OutgoingAction(send_text, text, buttons)<br/>])
-
-    %% ЭТАП 12: Отправка на платформу
-    Note over PlatformOut,UserResult: === ЭТАП 12: Доставка ответа пользователю ===
-    BotService->>Core: 79. BotResponse JSON
-    Core-->>Adapter: 80. Response JSON
-    Adapter->>Adapter: 81. build_inline_keyboard(buttons)
-    Adapter->>PlatformOut: 82. sendMessage(text, reply_markup)
-    PlatformOut-->>UserResult: 83. Пользователь получает ответ<br/>с кнопками 👍/👎
-
-    %% Альтернативные пути
-    alt normalize_text == "/start"
-        BotService->>BotService: 84. _build_start_buttons(is_subscribed)
+    opt QAServiceError
+        BotCore->>BotCore: 112. "Не удалось сформировать ответ..."<br/>(bot_service.py:203)
     end
 
-    %% Обработка ошибок
-    alt Ошибка QAServiceTimeout
-        BotService->>BotService: 85. "Поиск ответа занимает дольше обычного..."
-    else Ошибка QAServiceUnavailable
-        BotService->>BotService: 86. "Сервис временно недоступен..."
-    else Ошибка QAServiceError
-        BotService->>BotService: 87. "Не удалось сформировать ответ..."
-    end
+    %% Обработка /start команды
+    Note over BotCore: Обработка /start
+    BotCore->>BotCore: 113. _build_start_buttons(is_subscribed)<br/>(bot_service.py:234)
+
+    %% Callback обработка (подписка)
+    Note over TelegramAPI,BotCore: Callback обработка
+    TelegramAPI->>BotCore: 114. POST /callbacks<br/>(bot.py:222)
+    BotCore->>BotCore: 115. BotService.handle_callback()<br/>(bot_service.py:43)
+    BotCore->>Postgres: 116. UPDATE users SET is_subscribed = NOT is_subscribed
+    Postgres-->>BotCore: 117. COMMIT
+    BotCore-->>TelegramAPI: 118. BotResponse с новым статусом
+end
 ```
 
 ---
