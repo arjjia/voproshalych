@@ -18,7 +18,7 @@
 - обрабатывает `/start` и `/ping`
 - поддерживает inline callback-кнопки
 - хранит историю диалога
-- собирает контекст для QA из последних сообщений
+- собирает контекст для QA из последних сообщений и передает его в `context`
 - запускает праздничную рассылку вручную и по расписанию
 
 ## Трассировка По Функциям
@@ -32,10 +32,9 @@
 5. `core/services/bot_service.py -> _handle_dialog_message()`
 6. `core/services/dialog_service.py -> get_or_create_active_session()`
 7. `core/services/dialog_service.py -> build_context()`
-8. `core/services/bot_service.py -> _build_qa_question()`
-9. `core/services/bot_service.py -> _ask_qa_service()`
-10. `core/services/qa_service_client.py -> QAServiceClient.ask()`
-11. `core/services/dialog_service.py -> save_question_answer()`
+8. `core/services/bot_service.py -> _ask_qa_service()`
+9. `core/services/qa_service_client.py -> QAServiceClient.ask()`
+10. `core/services/dialog_service.py -> save_question_answer()`
 
 ### Обработка callback
 
@@ -80,6 +79,5 @@
 
 ## Ключевые ограничения
 
-- `context` в `qa-service` не используется как память диалога
-- контекст диалога собирается только в `bot-core`
+- контекст диалога собирается в `bot-core` и передается в `qa-service` как `context`
 - для `MAX` рассылка идет через внутренний endpoint адаптера, а не напрямую из `bot-core`

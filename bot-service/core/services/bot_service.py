@@ -206,8 +206,10 @@ class BotService:
             session_id=dialog_session.id,
             limit=settings.dialog_context_limit_messages,
         )
-        prompt = self._build_qa_question(question=question, history=history)
-        reply_text = self._ask_qa_service(prompt)
+        reply_text = self._ask_qa_service(
+            question=question,
+            context=history or None,
+        )
         self._dialog_service.save_question_answer(
             session_id=dialog_session.id,
             question=question,
@@ -261,11 +263,12 @@ class BotService:
             ]
         )
 
-    def _ask_qa_service(self, question: str) -> str:
+    def _ask_qa_service(self, question: str, context: str | None = None) -> str:
         """Отправляет вопрос в QA-сервис и возвращает ответ.
 
         Args:
             question: Текст вопроса пользователя.
+            context: История диалога или другой дополнительный контекст.
 
         Returns:
             str: Ответ QA-сервиса или fallback-текст.
@@ -275,13 +278,14 @@ class BotService:
         from services.qa_service_client import (
             QAServiceTimeout,
             QAServiceUnavailable,
+            QAServiceRateLimited,
             QAServiceError,
         )
 
         logger = logging.getLogger(__name__)
 
         try:
-            return self._qa_service_client.ask(question=question)
+            return self._qa_service_client.ask(question=question, context=context)
         except QAServiceTimeout:
             logger.error("QA service timeout")
             return (
@@ -293,6 +297,12 @@ class BotService:
             return (
                 "Сервис временно недоступен. "
                 "Мы уже работаем над устранением проблемы. Попробуйте через несколько минут."
+            )
+        except QAServiceRateLimited:
+            logger.error("QA service rate limited")
+            return (
+                "Сервис сейчас перегружен запросами. "
+                "Попробуйте повторить вопрос чуть позже."
             )
         except QAServiceError as e:
             logger.error(f"QA service error: {e}")
@@ -327,27 +337,6 @@ class BotService:
                     text="Эта команда пока не поддерживается.",
                 )
             ]
-        )
-
-    def _build_qa_question(self, question: str, history: str) -> str:
-        """Собирает запрос для QA с учетом последних сообщений диалога.
-
-        Args:
-            question: Новый вопрос пользователя.
-            history: История последних сообщений сессии.
-
-        Returns:
-            str: Текст запроса для QA-сервиса.
-        """
-
-        if not history:
-            return question
-
-        return (
-            "Ниже история текущего диалога.\n"
-            "Используй ее только как контекст для ответа на последний вопрос.\n\n"
-            f"{history}\n\n"
-            f"Последний вопрос пользователя: {question}"
         )
 
     def _build_start_response(self, message: IncomingMessage, user) -> BotResponse:

@@ -17,8 +17,8 @@
 1. `bot-core` находит или создает активную сессию пользователя.
 2. Берет последние сообщения из этой сессии.
 3. Собирает их в текстовый контекст.
-4. Добавляет к текущему вопросу.
-5. Отправляет запрос в `qa-service`.
+4. Передает историю в поле `context` запроса к `qa-service`.
+5. Отправляет текущий вопрос отдельно в поле `question`.
 6. Сохраняет вопрос и ответ в БД.
 
 ## Трассировка По Функциям
@@ -26,10 +26,9 @@
 1. `core/services/bot_service.py -> _handle_dialog_message()`
 2. `core/services/dialog_service.py -> get_or_create_active_session()`
 3. `core/services/dialog_service.py -> build_context()`
-4. `core/services/bot_service.py -> _build_qa_question()`
-5. `core/services/bot_service.py -> _ask_qa_service()`
-6. `core/services/qa_service_client.py -> ask()`
-7. `core/services/dialog_service.py -> save_question_answer()`
+4. `core/services/bot_service.py -> _ask_qa_service()`
+5. `core/services/qa_service_client.py -> ask()`
+6. `core/services/dialog_service.py -> save_question_answer()`
 
 При сохранении пары вопрос-ответ внутри `save_question_answer()` вызываются:
 
