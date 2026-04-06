@@ -1,5 +1,6 @@
 """GigaChat провайдер с использованием официального SDK."""
 
+import base64
 import logging
 
 from gigachat import GigaChat, ChatCompletion
@@ -28,7 +29,11 @@ class GigaChatProvider(BaseLLMProvider):
             client_secret: Client Secret (опционально, берется из конфига)
         """
         config = get_llm_config()
-        self._credentials = f"{client_id or config.gigachat_client_id}:{client_secret or config.gigachat_client_secret}"
+        client_id = client_id or config.gigachat_client_id
+        client_secret = client_secret or config.gigachat_client_secret
+        self._auth_key = base64.b64encode(
+            f"{client_id}:{client_secret}".encode()
+        ).decode()
         self._scope = "GIGACHAT_API_PERS"
         self._model = "GigaChat"
         self._client: GigaChat | None = None
@@ -40,7 +45,7 @@ class GigaChatProvider(BaseLLMProvider):
 
     def is_available(self) -> bool:
         """Проверить доступность провайдера."""
-        return bool(self._credentials and self._credentials != ":")
+        return bool(self._auth_key)
 
     def _get_client(self) -> GigaChat:
         """Получить или создать клиент GigaChat.
@@ -50,7 +55,7 @@ class GigaChatProvider(BaseLLMProvider):
         """
         if self._client is None:
             self._client = GigaChat(
-                credentials=self._credentials,
+                credentials=self._auth_key,
                 scope=self._scope,
                 verify_ssl_certs=False,
             )
@@ -75,14 +80,21 @@ class GigaChatProvider(BaseLLMProvider):
         Raises:
             Exception: При ошибке API
         """
+        import asyncio
+
         try:
             client = self._get_client()
 
-            response: ChatCompletion = client.chat(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            def _sync_chat():
+                return client.chat(
+                    {
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    }
+                )
+
+            response: ChatCompletion = await asyncio.to_thread(_sync_chat)
 
             content = response.choices[0].message.content
 

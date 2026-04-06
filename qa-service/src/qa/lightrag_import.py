@@ -222,13 +222,23 @@ async def import_chunks_to_lightrag(
         _update_version(vid, "completed", 0, 0, 0)
         return {"status": "no_chunks", "imported": 0, "version_id": vid}
 
-    documents = {}
+    documents_list = []
     processed = 0
     skipped = 0
     failed = 0
     error_messages = []
 
     engine = _get_engine()
+
+    documents_list = []
+    processed = 0
+    skipped = 0
+    failed = 0
+    error_messages = []
+
+    engine = _get_engine()
+
+    chunks_to_process = []
 
     with engine.connect() as conn:
         for chunk in chunks:
@@ -247,15 +257,17 @@ async def import_chunks_to_lightrag(
                 skipped += 1
                 continue
 
-            documents[chunk_id] = content
+            chunks_to_process.append((chunk_id, content))
+            documents_list.append(content)
             processed += 1
 
     try:
-        if documents:
-            await rag.ainsert(documents)
+        if documents_list:
+            # LightRAG insert/ainsert принимает список текстов, а не словарь
+            await rag.ainsert(documents_list)
 
             with engine.connect() as conn:
-                for chunk_id, content in documents.items():
+                for chunk_id, content in chunks_to_process:
                     content_hash = _compute_hash(content)
                     conn.execute(
                         text("""

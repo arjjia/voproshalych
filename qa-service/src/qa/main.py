@@ -37,6 +37,11 @@ def is_lightrag_ready() -> bool:
     return _lightrag_ready
 
 
+def is_lightrag_enabled() -> bool:
+    """Проверить, включен ли LightRAG через переменную окружения."""
+    return os.getenv("USE_LIGHT_RAG", "false").lower() == "true"
+
+
 async def init_lightrag():
     """Инициализировать LightRAG с PGGraphStorage и PGVectorStorage."""
     global _lightrag, _lightrag_ready

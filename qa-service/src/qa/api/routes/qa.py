@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import time
 
 import nest_asyncio
@@ -93,11 +94,11 @@ async def ask_question(request: QARequest) -> QAResponse:
     """Задать вопрос с LightRAG (primary) + fallback на classic RAG.
 
     Pipeline:
-    1. Попытка LightRAG (timeout: 20s)
+    1. Если USE_LIGHT_RAG=true -> LightRAG (timeout: 20s)
     2. При ошибке/таймауте -> classic RAG (timeout: 15s)
     3. При ошибке classic RAG -> user-friendly error
     """
-    use_lightrag = True
+    use_lightrag = os.getenv("USE_LIGHT_RAG", "false").lower() == "true"
 
     if use_lightrag:
         start_time = time.time()
