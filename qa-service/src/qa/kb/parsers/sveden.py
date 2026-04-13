@@ -134,7 +134,7 @@ class SvedenParser(BaseParser):
             return None
 
     async def _extract_text_ocr(self, pdf_bytes: BytesIO) -> str:
-        """Извлечь текст из PDF с помощью Tesseract OCR.
+        """Извлечь текст из PDF с использованием OCR (Tesseract).
 
         Args:
             pdf_bytes: PDF файл в памяти
@@ -142,28 +142,25 @@ class SvedenParser(BaseParser):
         Returns:
             Текст из PDF
         """
-        try:
-            get_tesseract_version()
-            ocr_config = get_ocr_config()
-            pdf_bytes.seek(0)
-            with pdfplumber.open(pdf_bytes) as pdf:
-                pages_text = []
-                for page in pdf.pages:
-                    page_image = page.to_image(resolution=300)
-                    pil_image = page_image.original
-                    ocr_text = pytesseract.image_to_string(
-                        pil_image,
-                        lang="rus+eng",
-                        config=" ".join(ocr_config),
-                    )
-                    if ocr_text and ocr_text.strip():
-                        pages_text.append(ocr_text.strip())
+        get_tesseract_version()
+        ocr_config = get_ocr_config()
+        pdf_bytes.seek(0)
 
-                if pages_text:
-                    return "\n".join(pages_text)
+        with pdfplumber.open(pdf_bytes) as pdf:
+            pages_text = []
+            for page in pdf.pages:
+                page_image = page.to_image(resolution=220)
+                pil_image = page_image.original
+                ocr_text = pytesseract.image_to_string(
+                    pil_image,
+                    lang="rus+eng",
+                    config=" ".join(ocr_config),
+                )
+                if ocr_text and ocr_text.strip():
+                    pages_text.append(ocr_text.strip())
 
-        except Exception as e:
-            logger.warning(f"OCR не сработал: {e}")
+            if pages_text:
+                return "\n".join(pages_text)
 
         return ""
 

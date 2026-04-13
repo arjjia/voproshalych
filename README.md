@@ -32,7 +32,7 @@
 | Backend | Python 3.12, FastAPI |
 | Database | PostgreSQL 18 + pgvector + Apache AGE |
 | Embeddings | deepvk/USER-bge-m3 (1024-dim) |
-| LLM Pool | Mistral → GigaChat → OpenRouter |
+| LLM Pool | OpenRouter → GigaChat → Mistral |
 | RAG | LightRAG (Hybrid Search + Knowledge Graph) |
 | Bot Frameworks | aiogram (Telegram), vkbottle (VK), aiohttp (MAX) |
 
@@ -57,7 +57,10 @@ cp .env.example .env
 
 2. Запуск всех сервисов:
 ```bash
-docker compose up -d --build
+docker compose up -d --build 
+
+# Запуск всех сервисов (кроме max-bot)
+docker compose up -d --build postgres db-migrate qa-service bot-core telegram-bot vk-bot
 ```
 
 3. Проверка состояния:
@@ -82,6 +85,42 @@ LIGHT_RAG_MODEL_NAME=deepvk-user-bge-m3
 
 # Использовать PostgreSQL для графа (требует Apache AGE)
 LIGHT_RAG_USE_PG_GRAPH=true
+```
+
+## Конфигурация LLM (провайдеры и модели)
+
+### Провайдеры по приоритету
+
+```
+1. OpenRouter (бесплатные модели) ← Лучшее качество
+2. GigaChat (Freemium)
+3. Mistral (open-mistral-nemo)
+```
+
+### Модели OpenRouter (по качеству, лучшие → худшие)
+
+| # | Модель | Размер | Context | Статус |
+|---|--------|--------|---------|--------|
+| 1 | NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b:free`) | 120B (12B active) | 262K | ✅ Работает |
+| 2 | Arcee Trinity Large (`arcee-ai/trinity-large-preview:free`) | 400B (13B active) | 128K | ✅ Работает |
+| 3 | Qwen 3.6 Plus (`qwen/qwen3.6-plus:free`) | - | 1M | ⚠️ Rate Limited (429) |
+| 4 | **Fallback**: Random Free (`openrouter/free`) | - | - | Резервная |
+
+### Сравнение с Mistral
+
+- **Nemotron 3 Super** и **Trinity Large** превосходят Mistral по размеру контекста и качеству на сложных задачах
+- Mistral работает стабильно, но имеет ограниченный контекст
+- **Рекомендация**: OpenRouter (Nemotron) → Mistral
+
+### Переменные окружения
+
+```bash
+# OpenRouter - модели по приоритету
+OPENROUTER_MODELS=nvidia/nemotron-3-super-120b-a12b:free,arcee-ai/trinity-large-preview:free,qwen/qwen3.6-plus:free
+OPENROUTER_FALLBACK_MODEL=openrouter/free
+
+# Mistral
+MISTRAL_MODEL=open-mistral-nemo
 ```
 
 ## API Endpoints
@@ -161,6 +200,15 @@ docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
 
 ### Импорт чанков в LightRAG и построение графа знаний
 
+Для построения графа знаний используется LLM. Модель настраивается через переменную `LIGHT_RAG_LLM_MODEL` в `.env`:
+
+```bash
+# Модель для индексации (по умолчанию: nvidia/nemotron-3-super-120b-a12b:free)
+LIGHT_RAG_LLM_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+```
+
+> **Важно**: Для качественного графа знаний рекомендуется использовать мощные модели. По умолчанию используется **NVIDIA Nemotron 3 Super** (120B параметров, 262K контекст).
+
 ```bash
 # 1. Импорт чанков в LightRAG (включает KG extraction)
 curl -X POST http://localhost:8004/kb/import-to-lightrag
@@ -192,15 +240,7 @@ docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
 
 ```bash
 # Удалить все данные LightRAG (при необходимости пересоздать с нуля)
-docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "
-  TRUNCATE lightrag_doc_chunks, lightrag_doc_full, lightrag_doc_registry, 
-           lightrag_doc_status, lightrag_entity_chunks, lightrag_full_entities, 
-           lightrag_full_relations, lightrag_index_versions, lightrag_llm_cache, 
-           lightrag_relation_chunks, lightrag_vdb_chunks_deepvk_user_bge_m3_1024d,
-           lightrag_vdb_entity_deepvk_user_bge_m3_1024d, 
-           lightrag_vdb_relation_deepvk_user_bge_m3_1024d 
-  RESTART IDENTITY CASCADE;
-"
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "TRUNCATE lightrag_doc_chunks, lightrag_doc_full, lightrag_doc_registry, lightrag_doc_status, lightrag_entity_chunks, lightrag_full_entities, lightrag_full_relations, lightrag_index_versions, lightrag_llm_cache, lightrag_relation_chunks, lightrag_vdb_chunks_deepvk_user_bge_m3_1024d, lightrag_vdb_entity_deepvk_user_bge_m3_1024d, lightrag_vdb_relation_deepvk_user_bge_m3_1024d RESTART IDENTITY CASCADE;"
 ```
 
 ### Тестирование fallback логики

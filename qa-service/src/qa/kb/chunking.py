@@ -1,9 +1,12 @@
 """Разбиение текста на чанки для Базы Знаний."""
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Generator
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from qa.kb.config import get_kb_config
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +22,7 @@ class Chunk:
 
 
 class TextChunker:
-    """Разбиение текста на перекрывающиеся чанки."""
+    """Разбиение текста на перекрывающиеся чанки по предложениям."""
 
     def __init__(
         self,
@@ -38,6 +41,14 @@ class TextChunker:
         self.chunk_overlap = chunk_overlap
         self.min_chunk_size = min_chunk_size
 
+        self._splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n\n", "\n\n", "\n", ". "],
+            length_function=len,
+            keep_separator=True,
+        )
+
     def chunk_text(
         self,
         text: str,
@@ -45,6 +56,9 @@ class TextChunker:
         title: str = "",
     ) -> Generator[Chunk, None, None]:
         """Разбить текст на перекрывающиеся чанки.
+
+        Использует RecursiveCharacterTextSplitter для разбиения
+        по предложениям с ограничением максимального размера чанка.
 
         Args:
             text: Текст для разбиения
@@ -59,31 +73,7 @@ class TextChunker:
             logger.warning(f"Empty text for {source_url}")
             return
 
-        paragraphs = self._split_into_paragraphs(text)
-        chunks: list[str] = []
-        current_chunk = ""
-
-        for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if not paragraph:
-                continue
-
-            if len(current_chunk) + len(paragraph) + 1 <= self.chunk_size:
-                if current_chunk:
-                    current_chunk += "\n\n" + paragraph
-                else:
-                    current_chunk = paragraph
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                    overlap_start = max(0, len(current_chunk) - self.chunk_overlap)
-                    current_chunk = current_chunk[overlap_start:] + "\n\n" + paragraph
-                else:
-                    chunks.append(paragraph)
-                    current_chunk = ""
-
-        if current_chunk:
-            chunks.append(current_chunk)
+        chunks = self._splitter.split_text(text)
 
         for i, chunk_text in enumerate(chunks):
             if len(chunk_text) >= self.min_chunk_size:
@@ -96,15 +86,16 @@ class TextChunker:
 
         logger.info(f"Created {len(chunks)} chunks from {source_url}")
 
-    def _split_into_paragraphs(self, text: str) -> list[str]:
-        """Разбить текст на абзацы.
 
-        Args:
-            text: Текст для разбиения
+def get_chunker() -> TextChunker:
+    """Получить чанкер с настройками из конфига.
 
-        Returns:
-            Список абзацев
-        """
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        paragraphs = text.split("\n\n")
-        return [p.strip() for p in paragraphs if p.strip()]
+    Returns:
+        TextChunker с параметрами из KBConfig
+    """
+    config = get_kb_config()
+    return TextChunker(
+        chunk_size=config.chunk_size,
+        chunk_overlap=config.chunk_overlap,
+        min_chunk_size=config.min_chunk_size,
+    )

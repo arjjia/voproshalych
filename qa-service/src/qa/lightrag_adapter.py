@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Any, List
 
 import numpy as np
 
@@ -11,6 +11,64 @@ from qa.llm import get_llm_pool, get_llm_config
 from qa.kb.embedding import get_embeddings_batch
 
 logger = logging.getLogger(__name__)
+
+_tokenizer = None
+
+
+class HuggingFaceTokenizer:
+    """Токенизатор на основе HuggingFace для LightRAG.
+
+    Использует тот же токенизатор что и embedding модель (deepvk/USER-bge-m3),
+    чтобы количество токенов совпадало.
+    """
+
+    def __init__(self, model_name: str = "deepvk/USER-bge-m3"):
+        """Инициализировать токенизатор.
+
+        Args:
+            model_name: Название модели HuggingFace
+        """
+        from transformers import AutoTokenizer
+
+        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model_name = model_name
+        logger.info(f"HuggingFaceTokenizer initialized with {model_name}")
+
+    def encode(self, content: str) -> List[int]:
+        """Закодировать текст в токены.
+
+        Args:
+            content: Текст для токенизации
+
+        Returns:
+            Список токенов
+        """
+        return self._tokenizer.encode(content, add_special_tokens=True)
+
+    def decode(self, tokens: List[int]) -> str:
+        """Декодировать токены в текст.
+
+        Args:
+            tokens: Список токенов
+
+        Returns:
+            Текст
+        """
+        return self._tokenizer.decode(tokens, skip_special_tokens=True)
+
+
+def get_lightrag_tokenizer() -> HuggingFaceTokenizer:
+    """Получить токенизатор для LightRAG.
+
+    Использует SentencePiece токенизатор от deepvk/USER-bge-m3.
+
+    Returns:
+        Экземпляр HuggingFaceTokenizer
+    """
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = HuggingFaceTokenizer("deepvk/USER-bge-m3")
+    return _tokenizer
 
 _llm_call_count = 0
 _llm_last_call_time = 0.0
@@ -141,4 +199,6 @@ def create_lightrag_config() -> dict:
         "embedding_dimension": 1024,
         "model_name": os.getenv("LIGHT_RAG_MODEL_NAME", "deepvk-user-bge-m3"),
         "use_pg_graph": os.getenv("LIGHT_RAG_USE_PG_GRAPH", "true").lower() == "true",
+        "chunk_token_size": int(os.getenv("CHUNK_TOKEN_SIZE", "1024")),
+        "tokenizer": get_lightrag_tokenizer(),
     }

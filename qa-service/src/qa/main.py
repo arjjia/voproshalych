@@ -38,8 +38,11 @@ def is_lightrag_ready() -> bool:
 
 
 def is_lightrag_enabled() -> bool:
-    """Проверить, включен ли LightRAG через переменную окружения."""
-    return os.getenv("USE_LIGHT_RAG", "false").lower() == "true"
+    """Проверить, включен ли LightRAG.
+
+    LightRAG всегда включен (гибридный поиск: вектора + граф).
+    """
+    return True
 
 
 async def init_lightrag():
@@ -68,6 +71,8 @@ async def init_lightrag():
         # PGGraphStorage requires Apache AGE extension (dawsonlp/postgres-batteries-inc)
         # NetworkXStorage is fallback when AGE is not available
         use_pg_graph = config.get("use_pg_graph", True)
+        chunk_token_size = config.get("chunk_token_size", 1024)
+        tokenizer = config.get("tokenizer")
 
         _lightrag = LightRAG(
             working_dir=config["working_dir"],
@@ -80,6 +85,8 @@ async def init_lightrag():
             ),
             graph_storage="PGGraphStorage" if use_pg_graph else "NetworkXStorage",
             vector_storage="PGVectorStorage" if storage_type == "PostgreSQL" else None,
+            chunk_token_size=chunk_token_size,
+            tokenizer=tokenizer,
         )
 
         if storage_type == "PostgreSQL":
@@ -114,11 +121,8 @@ async def lifespan(app: FastAPI):
     available = llm_pool.get_available_providers()
     logger.info(f"Available LLM providers: {available}")
 
-    use_lightrag = os.getenv("USE_LIGHT_RAG", "false").lower() == "true"
-    if use_lightrag:
-        await init_lightrag()
-    else:
-        logger.info("LightRAG disabled (set USE_LIGHT_RAG=true to enable)")
+    # LightRAG всегда включен (гибридный поиск: вектора + граф)
+    await init_lightrag()
 
     yield
 

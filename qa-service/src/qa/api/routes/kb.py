@@ -167,12 +167,6 @@ async def import_to_lightrag(
     """
     import os
 
-    if os.getenv("USE_LIGHT_RAG", "false").lower() != "true":
-        raise HTTPException(
-            status_code=400,
-            detail="LightRAG not enabled. Set USE_LIGHT_RAG=true in environment",
-        )
-
     try:
         from qa.lightrag_import import import_chunks_to_lightrag
 
@@ -193,14 +187,6 @@ async def import_to_lightrag(
 @router.post("/rebuild-knowledge-graph")
 async def rebuild_knowledge_graph(version_id: Optional[str] = None) -> dict:
     """Перестроить Knowledge Graph (только граф, без переиндексации чанков)."""
-    import os
-
-    if os.getenv("USE_LIGHT_RAG", "false").lower() != "true":
-        raise HTTPException(
-            status_code=400,
-            detail="LightRAG not enabled. Set USE_LIGHT_RAG=true in environment",
-        )
-
     try:
         from qa.lightrag_import import rebuild_knowledge_graph
 

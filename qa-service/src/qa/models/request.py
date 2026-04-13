@@ -22,11 +22,13 @@ class QAResponse(BaseModel):
         answer: Ответ от LLM
         model: Использованная модель
         sources: Источники (если есть)
+        expanded_query: Расширенный запрос (опционально)
     """
 
     answer: str
     model: str
     sources: list[str] = Field(default_factory=list)
+    expanded_query: str | None = Field(default=None, max_length=5000)
 
 
 class HolidayGreetingRequest(BaseModel):

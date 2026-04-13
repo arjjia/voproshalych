@@ -4,33 +4,39 @@
 парсит 1 PDF → чанки → эмбеддинги батчами → сохраняет в БД.
 
 Аргументы:
-    --clear   Очистить таблицы перед заполнением (по умолчанию)
-    --resume  Продолжить с последнего места (без очистки)
+    --clear   Очистить таблицы перед заполнением
+    --resume  Продолжить с последнего места (инкрементально)
+    --append  Добавить данные без проверки существующих документов
+    --source  Индексировать только выбранный источник
 
 Пример использования:
-    # Очистить и заполнить с нуля
+    # Очистить и заполнить с нуля (все источники)
     python scripts/fill_kb_from_sources.py --clear
 
     # Продолжить с последнего места
     python scripts/fill_kb_from_sources.py --resume
+
+    # Добавить только Confluence Study поверх текущих данных
+    python scripts/fill_kb_from_sources.py --append --source confluence_study
 """
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import uuid
 from dataclasses import dataclass, field
-from urllib.parse import unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from sqlalchemy import create_engine, text
 
 from qa.kb.chunking import Chunk, TextChunker
 from qa.kb.config import get_kb_config
 from qa.kb.embedding import get_embeddings_batch
-from qa.kb.parsers import ConfluenceParser, SvedenParser, UtmnParser
+from qa.kb.parsers import ConfluenceParser, ConfluenceStudyParser, SvedenParser, UtmnParser
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,15 +44,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MAX_TITLE_LENGTH = 255
-MAX_URL_LENGTH = 2048
-
-
 def sanitize_title(title: str) -> str:
     """Очистить и обрезать заголовок документа.
 
-    Выполняет URL-decoding, удаляет непечатные символы и обрезает
-    до MAX_TITLE_LENGTH символов.
+    Выполняет URL-decoding и удаляет непечатные символы.
 
     Args:
         title: Заголовок документа
@@ -56,23 +57,58 @@ def sanitize_title(title: str) -> str:
     """
     title = unquote(title)
     title = re.sub(r"[\x00-\x1f\x7f]", "", title)
-    if len(title) > MAX_TITLE_LENGTH:
-        title = title[:MAX_TITLE_LENGTH]
     return title
 
 
 def sanitize_url(url: str) -> str:
-    """Обрезать URL до максимальной длины.
+    """Очистить URL от непечатных символов.
 
     Args:
         url: URL документа
 
     Returns:
-        Обрезанный URL
+        Очищенный URL
     """
-    if len(url) > MAX_URL_LENGTH:
-        url = url[:MAX_URL_LENGTH]
-    return url
+    return re.sub(r"[\x00-\x1f\x7f]", "", url)
+
+
+def normalize_url(url: str) -> str:
+    """Нормализовать URL для дедупликации.
+
+    Нормализация помогает корректно сравнивать URL в --resume:
+    - http -> https
+    - удаление query/fragment
+    - приведение хоста к lowercase
+    - удаление префикса www.
+    - нормализация percent-encoding в пути
+    """
+    if not url:
+        return ""
+
+    try:
+        parsed = urlsplit(url.strip())
+        host = parsed.netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+
+        path = unquote(parsed.path or "/")
+        path = re.sub(r"/+", "/", path)
+        path = path.rstrip("/") or "/"
+        path = re.sub(r"\.pdf$", ".pdf", path, flags=re.IGNORECASE)
+        path = quote(path, safe="/-._~")
+
+        return urlunsplit(("https", host, path, "", ""))
+    except Exception:
+        return url.strip()
+
+
+def make_doc_key(source_type: str, file_url: str | None, page_url: str, title: str) -> str:
+    """Сформировать стабильный ключ документа для инкрементальной индексации."""
+    base = normalize_url(file_url or page_url)
+    if not base:
+        base = f"{source_type}:{sanitize_title(title)}"
+    payload = f"{source_type}:{base}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -127,16 +163,18 @@ class Document:
     """Модель документа для обработки.
 
     Attributes:
-        url: URL документа
+        url: user-facing URL страницы источника
         title: Название документа
         text_content: Текстовое содержимое
         source_type: Тип источника (confluence/sveden/utmn)
+        file_url: Прямой URL файла (если документ получен из PDF)
     """
 
     url: str
     title: str
     text_content: str
     source_type: str
+    file_url: str | None = None
 
 
 @dataclass
@@ -187,22 +225,86 @@ def get_db_engine():
     return create_engine(db_url)
 
 
-def load_existing_urls(engine) -> set[str]:
-    """Загрузить существующие URL документов из базы данных.
-
-    Используется при запуске с --resume для пропуска уже обработанных документов.
-
-    Args:
-        engine: SQLAlchemy Engine
-
-    Returns:
-        Множество URL документов уже в БД
-    """
+def ensure_registry_table(engine) -> None:
+    """Создать таблицу реестра обработанных документов (для resume)."""
     with engine.connect() as conn:
-        result = conn.execute(text("SELECT DISTINCT source_url FROM chunks"))
-        urls = {row[0] for row in result}
-    logger.info(f"В БД уже есть {len(urls)} URL документов")
-    return urls
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS kb_documents_registry (
+                    doc_key TEXT PRIMARY KEY,
+                    source_type VARCHAR(50) NOT NULL,
+                    page_url TEXT,
+                    file_url TEXT,
+                    title TEXT,
+                    chunks_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        conn.commit()
+
+
+def load_existing_doc_keys(engine) -> set[str]:
+    """Загрузить ключи уже обработанных документов.
+
+    Источники ключей:
+    1. Реестр kb_documents_registry (основной)
+    2. Legacy fallback из chunks.source_url
+    """
+    doc_keys: set[str] = set()
+
+    with engine.connect() as conn:
+        try:
+            result = conn.execute(text("SELECT doc_key FROM kb_documents_registry"))
+            doc_keys.update(row[0] for row in result if row[0])
+        except Exception:
+            pass
+
+        result = conn.execute(
+            text(
+                "SELECT DISTINCT source_type, source_url FROM chunks WHERE source_url IS NOT NULL"
+            )
+        )
+        for row in result:
+            legacy_key = make_doc_key(row.source_type or "unknown", row.source_url, row.source_url, "")
+            doc_keys.add(legacy_key)
+
+    logger.info(f"В реестре уже есть {len(doc_keys)} обработанных документов")
+    return doc_keys
+
+
+def upsert_document_registry(engine, doc: Document, doc_key: str, chunks_count: int) -> None:
+    """Сохранить документ в реестр обработанных документов."""
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO kb_documents_registry (
+                    doc_key, source_type, page_url, file_url, title, chunks_count
+                ) VALUES (
+                    :doc_key, :source_type, :page_url, :file_url, :title, :chunks_count
+                )
+                ON CONFLICT (doc_key) DO UPDATE SET
+                    page_url = EXCLUDED.page_url,
+                    file_url = EXCLUDED.file_url,
+                    title = EXCLUDED.title,
+                    chunks_count = EXCLUDED.chunks_count,
+                    updated_at = NOW()
+                """
+            ),
+            {
+                "doc_key": doc_key,
+                "source_type": doc.source_type,
+                "page_url": sanitize_url(doc.url),
+                "file_url": sanitize_url(doc.file_url) if doc.file_url else None,
+                "title": sanitize_title(doc.title),
+                "chunks_count": chunks_count,
+            },
+        )
+        conn.commit()
 
 
 def clear_tables(engine) -> None:
@@ -213,11 +315,12 @@ def clear_tables(engine) -> None:
     Args:
         engine: SQLAlchemy Engine
     """
-    logger.info("Очистка таблиц chunks и embeddings...")
+    logger.info("Очистка таблиц chunks, embeddings и реестра документов...")
 
     with engine.connect() as conn:
         conn.execute(text("TRUNCATE TABLE embeddings CASCADE"))
         conn.execute(text("TRUNCATE TABLE chunks RESTART IDENTITY CASCADE"))
+        conn.execute(text("TRUNCATE TABLE kb_documents_registry"))
         conn.commit()
 
     logger.info("Таблицы очищены")
@@ -244,43 +347,58 @@ def save_chunks_batch(
     count = len(chunks_with_meta)
     logger.info(f"  → Сохранение {count} чанков в БД...")
 
-    with engine.connect() as conn:
-        for item, embedding in zip(chunks_with_meta, embeddings):
-            try:
-                chunk_id = uuid.uuid4()
-                conn.execute(
-                    text("""
-                        INSERT INTO chunks (id, text, source_url, source_type, title)
-                        VALUES (:id, :text, :source_url, :source_type, :title)
-                    """),
-                    {
-                        "id": str(chunk_id),
-                        "text": item.chunk.text,
-                        "source_url": sanitize_url(item.chunk.source_url),
-                        "source_type": item.source_type,
-                        "title": sanitize_title(item.document_title),
-                    },
-                )
-                conn.execute(
-                    text("""
-                        INSERT INTO embeddings (chunk_id, embedding)
-                        VALUES (:chunk_id, :embedding)
-                    """),
-                    {
-                        "chunk_id": str(chunk_id),
-                        "embedding": json.dumps(embedding),
-                    },
-                )
-            except Exception as e:
-                logger.error(
-                    f"  → Ошибка сохранения чанка '{item.document_title}': {e}"
-                )
-                conn.rollback()
-                continue
-        conn.commit()
+    chunk_rows = []
+    embedding_rows = []
 
-    logger.info(f"  → Сохранено {count} чанков")
-    return count
+    for item, embedding in zip(chunks_with_meta, embeddings):
+        chunk_id = str(uuid.uuid4())
+        chunk_rows.append(
+            {
+                "id": chunk_id,
+                "text": item.chunk.text,
+                "source_url": sanitize_url(item.chunk.source_url),
+                "source_type": item.source_type,
+                "title": sanitize_title(item.document_title),
+            }
+        )
+        embedding_rows.append(
+            {
+                "chunk_id": chunk_id,
+                "embedding": json.dumps(embedding),
+            }
+        )
+
+    if not chunk_rows:
+        return 0
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO chunks (id, text, source_url, source_type, title)
+                    VALUES (:id, :text, :source_url, :source_type, :title)
+                    """
+                ),
+                chunk_rows,
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO embeddings (chunk_id, embedding)
+                    VALUES (:chunk_id, :embedding)
+                    """
+                ),
+                embedding_rows,
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"  → Ошибка батч-сохранения чанков: {e}")
+        return 0
+
+    saved_count = len(chunk_rows)
+    logger.info(f"  → Сохранено {saved_count} чанков")
+    return saved_count
 
 
 def chunk_document(
@@ -323,7 +441,7 @@ def process_document(
         logger.warning(f"[{doc_idx}] Документ '{doc.title}' без чанков")
         return 0
 
-    EMBEDDING_BATCH = 5
+    EMBEDDING_BATCH = int(os.getenv("KB_EMBEDDING_BATCH_SIZE", "32"))
     total_saved = 0
 
     for start in range(0, len(chunks), EMBEDDING_BATCH):
@@ -343,7 +461,8 @@ async def run_source(
     chunker: TextChunker,
     source_name: str,
     get_docs_func,
-    existing_urls: set[str],
+    existing_doc_keys: set[str],
+    skip_existing: bool = True,
 ) -> tuple[int, int]:
     """Обработать все документы из источника инкрементально."""
 
@@ -356,7 +475,9 @@ async def run_source(
     skipped = 0
 
     async for doc in get_docs_func():
-        if doc.url in existing_urls:
+        doc_key = make_doc_key(doc.source_type, doc.file_url, doc.url, doc.title)
+
+        if skip_existing and doc_key in existing_doc_keys:
             logger.info(f"[{total_docs + 1}] Пропуск (уже в БД): '{doc.title}'")
             skipped += 1
             total_docs += 1
@@ -368,20 +489,20 @@ async def run_source(
         saved = process_document(engine, chunker, doc, total_docs)
         total_chunks += saved
 
+        if saved > 0:
+            existing_doc_keys.add(doc_key)
+            upsert_document_registry(engine, doc, doc_key, saved)
+
     logger.info(
         f"Источник {source_name}: {total_docs} документов ({skipped} пропущено), {total_chunks} чанков"
     )
     return total_docs, total_chunks
 
 
-async def iterate_confluence(config: Config, existing_urls: set[str]):
+async def iterate_confluence(config: Config, existing_file_urls: set[str]):
     parser = ConfluenceParser()
 
     for page_url in config.confluence_pages:
-        if page_url in existing_urls:
-            logger.info(f"Пропуск страницы (уже в БД): {page_url}")
-            continue
-
         page_id = parser._extract_page_id(page_url)
         if not page_id:
             logger.error(f"Не удалось извлечь page_id из URL: {page_url}")
@@ -414,49 +535,59 @@ async def iterate_confluence(config: Config, existing_urls: set[str]):
             if not download_url.startswith("http"):
                 download_url = parser._host + download_url
 
+            normalized_file_url = normalize_url(download_url)
+            if normalized_file_url in existing_file_urls:
+                logger.info(f"  [{idx}] Пропуск PDF (уже в БД): '{title}'")
+                continue
+
             if not is_pdf:
                 continue
 
             logger.info(f"[{idx}] Парсинг PDF: '{title}'")
+            existing_file_urls.add(normalized_file_url)
 
             doc = await parser._parse_pdf(download_url, title, page_url)
             if doc:
                 yield Document(
-                    url=doc.url,
+                    url=page_url,
                     title=doc.title,
                     text_content=doc.text_content,
                     source_type="confluence",
+                    file_url=download_url,
                 )
             else:
                 logger.warning(f"[{idx}] Не удалось распарсить: '{title}'")
 
 
-async def iterate_sveden(config: Config, existing_urls: set[str]):
+async def iterate_sveden(config: Config, existing_file_urls: set[str]):
     parser = SvedenParser()
     logger.info(f"Поиск PDF ссылок: {config.sveden_url}")
     pdf_urls = await parser._find_pdf_links(config.sveden_url)
     logger.info(f"Sveden: найдено {len(pdf_urls)} PDF ссылок")
 
     for idx, pdf_url in enumerate(pdf_urls, 1):
-        if pdf_url in existing_urls:
+        normalized_file_url = normalize_url(pdf_url)
+        if normalized_file_url in existing_file_urls:
             logger.info(f"[{idx}/{len(pdf_urls)}] Пропуск (уже в БД): {pdf_url}")
             continue
 
         logger.info(f"[{idx}/{len(pdf_urls)}] Парсинг PDF: {pdf_url}")
+        existing_file_urls.add(normalized_file_url)
 
         doc = await parser._parse_pdf(pdf_url)
         if doc:
             yield Document(
-                url=doc.url,
+                url=config.sveden_url,
                 title=doc.title,
                 text_content=doc.text_content,
                 source_type="sveden",
+                file_url=pdf_url,
             )
         else:
             logger.warning(f"[{idx}] Не удалось распарсить: {pdf_url}")
 
 
-async def iterate_utmn(config: Config, existing_urls: set[str]):
+async def iterate_utmn(config: Config, existing_file_urls: set[str]):
     parser = UtmnParser()
     total_pages = len(config.utmn_pages)
     logger.info(f"Парсинг {total_pages} страниц ТюмГУ...")
@@ -467,21 +598,106 @@ async def iterate_utmn(config: Config, existing_urls: set[str]):
         logger.info(f"    Найдено {len(pdf_urls)} PDF ссылок")
 
         for pdf_url in pdf_urls:
-            if pdf_url in existing_urls:
+            normalized_file_url = normalize_url(pdf_url)
+            if normalized_file_url in existing_file_urls:
                 logger.info(f"    Пропуск (уже в БД): {pdf_url}")
                 continue
+
+            existing_file_urls.add(normalized_file_url)
 
             doc = await parser._parse_pdf(pdf_url)
             if doc:
                 yield Document(
-                    url=doc.url,
+                    url=page_url,
                     title=doc.title,
                     text_content=doc.text_content,
                     source_type="utmn",
+                    file_url=pdf_url,
                 )
 
 
-async def main(clear_tables_flag: bool) -> None:
+async def iterate_confluence_study(existing_file_urls: set[str]):
+    """Итератор для парсинга пространства study из Confluence.
+
+    Парсит все листовые страницы (без дочерних) из пространства study,
+    включая HTML контент и PDF вложения.
+
+    Args:
+        existing_urls: Множество уже существующих URL в БД
+    """
+    parser = ConfluenceStudyParser()
+
+    logger.info("Получение страниц из пространства study...")
+
+    # Получаем все страницы пространства через REST API
+    url = f"{parser._host}/rest/api/search"
+    params = {"cql": "space.key=study order by id", "start": 0, "limit": 100}
+
+    import httpx
+    all_pages = []
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        while True:
+            response = await client.get(url, headers=parser._headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+            for r in results:
+                if "content" in r:
+                    all_pages.append(r["content"])
+            
+            if len(results) < 100:
+                break
+            params["start"] += 100
+
+    pages = all_pages
+    logger.info(f"Найдено {len(pages)} страниц в пространстве study")
+
+    # Фильтруем листовые страницы
+    leaf_pages = []
+    for page in pages:
+        page_id = page["id"]
+        has_children = await parser._has_child_pages(page_id)
+        if not has_children:
+            leaf_pages.append(page)
+
+    logger.info(f"Листовых страниц (без дочерних): {len(leaf_pages)}")
+
+    for idx, page in enumerate(leaf_pages, 1):
+        page_title = page.get("title", "Untitled")
+        page_url = parser._host + page["_links"]["webui"]
+
+        logger.info(f"[{idx}] Парсинг страницы: '{page_title}'")
+
+        # Парсим HTML контент
+        html_doc = await parser._parse_page_html(page["id"], page_title, page_url)
+        if html_doc and html_doc.text_content.strip():
+            yield Document(
+                url=page_url,
+                title=html_doc.title,
+                text_content=html_doc.text_content,
+                source_type="confluence_study",
+                file_url=None,
+            )
+
+        # Парсим PDF вложения
+        pdf_docs = await parser._parse_page_attachments(page["id"], page_title, page_url)
+        for pdf_doc in pdf_docs:
+            normalized_file_url = normalize_url(pdf_doc.url)
+            if normalized_file_url in existing_file_urls:
+                logger.info(f"  → PDF уже в БД: '{pdf_doc.title}'")
+                continue
+
+            existing_file_urls.add(normalized_file_url)
+            yield Document(
+                url=page_url,
+                title=pdf_doc.title,
+                text_content=pdf_doc.text_content,
+                source_type="confluence_study",
+                file_url=pdf_doc.url,
+            )
+
+
+async def main(mode: str, source_filter: str) -> None:
     logger.info("Начало заполнения Базы Знаний...")
 
     engine = get_db_engine()
@@ -493,52 +709,99 @@ async def main(clear_tables_flag: bool) -> None:
         min_chunk_size=kb_config.min_chunk_size,
     )
 
-    if clear_tables_flag:
+    ensure_registry_table(engine)
+
+    if mode == "clear":
         clear_tables(engine)
-        existing_urls: set[str] = set()
+        existing_doc_keys: set[str] = set()
+        existing_file_urls: set[str] = set()
     else:
-        existing_urls = load_existing_urls(engine)
+        existing_doc_keys = load_existing_doc_keys(engine)
+
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT DISTINCT source_url FROM chunks WHERE source_url IS NOT NULL")
+            )
+            existing_file_urls = {normalize_url(row[0]) for row in result if row[0]}
+            try:
+                reg_files = conn.execute(
+                    text(
+                        "SELECT DISTINCT file_url FROM kb_documents_registry WHERE file_url IS NOT NULL"
+                    )
+                )
+                existing_file_urls.update(
+                    normalize_url(row[0]) for row in reg_files if row[0]
+                )
+            except Exception:
+                pass
+
+    skip_existing = mode != "append"
 
     config = Config()
 
     total_docs = 0
     total_chunks = 0
 
-    conf_docs, conf_chunks = await run_source(
-        engine,
-        chunker,
-        "Confluence",
-        lambda: iterate_confluence(config, existing_urls),
-        existing_urls,
-    )
-    total_docs += conf_docs
-    total_chunks += conf_chunks
+    source_jobs = {
+        "confluence": (
+            "Confluence",
+            lambda: iterate_confluence(config, existing_file_urls),
+        ),
+        "sveden": (
+            "Sveden",
+            lambda: iterate_sveden(config, existing_file_urls),
+        ),
+        "utmn": (
+            "Utmn",
+            lambda: iterate_utmn(config, existing_file_urls),
+        ),
+        "confluence_study": (
+            "ConfluenceStudy",
+            lambda: iterate_confluence_study(existing_file_urls),
+        ),
+    }
 
-    sved_docs, sved_chunks = await run_source(
-        engine,
-        chunker,
-        "Sveden",
-        lambda: iterate_sveden(config, existing_urls),
-        existing_urls,
+    selected_sources = (
+        [source_filter] if source_filter != "all" else list(source_jobs.keys())
     )
-    total_docs += sved_docs
-    total_chunks += sved_chunks
 
-    utmn_docs, utmn_chunks = await run_source(
-        engine,
-        chunker,
-        "Utmn",
-        lambda: iterate_utmn(config, existing_urls),
-        existing_urls,
-    )
-    total_docs += utmn_docs
-    total_chunks += utmn_chunks
+    for source_name in selected_sources:
+        display_name, iterator = source_jobs[source_name]
+        docs, chunks = await run_source(
+            engine,
+            chunker,
+            display_name,
+            iterator,
+            existing_doc_keys,
+            skip_existing=skip_existing,
+        )
+        total_docs += docs
+        total_chunks += chunks
 
     logger.info("")
     logger.info("=" * 50)
     logger.info(f"Заполнение завершено!")
     logger.info(f"Всего документов: {total_docs}")
     logger.info(f"Всего чанков сохранено: {total_chunks}")
+    logger.info("=" * 50)
+
+    # Импорт чанков в LightRAG (гибридный поиск: вектора + граф)
+    try:
+        logger.info("")
+        logger.info("=" * 50)
+        logger.info("Импорт чанков в LightRAG...")
+
+        os.environ["USE_LIGHT_RAG"] = "true"
+
+        from qa.lightrag_import import import_chunks_to_lightrag
+        import_result = await import_chunks_to_lightrag(
+            version_id=None,
+            notes=f"Index mode={mode}, source={source_filter}: {total_chunks} chunks, {total_docs} docs"
+        )
+        logger.info(f"LightRAG import: {import_result}")
+    except Exception as e:
+        logger.warning(f"LightRAG import failed (will continue): {e}")
+
     logger.info("=" * 50)
 
 
@@ -548,15 +811,31 @@ if __name__ == "__main__":
     group.add_argument(
         "--clear",
         action="store_true",
-        default=True,
-        help="Очистить таблицы перед заполнением (по умолчанию)",
+        help="Очистить таблицы перед заполнением",
     )
     group.add_argument(
         "--resume",
-        action="store_false",
-        dest="clear",
+        action="store_true",
         help="Продолжить с последнего места (без очистки)",
+    )
+    group.add_argument(
+        "--append",
+        action="store_true",
+        help="Добавить данные поверх текущих без проверки на существование",
+    )
+    parser.add_argument(
+        "--source",
+        choices=["all", "confluence", "sveden", "utmn", "confluence_study"],
+        default="all",
+        help="Индексировать только выбранный источник",
     )
     args = parser.parse_args()
 
-    asyncio.run(main(args.clear))
+    if args.clear:
+        mode = "clear"
+    elif args.append:
+        mode = "append"
+    else:
+        mode = "resume"
+
+    asyncio.run(main(mode, args.source))

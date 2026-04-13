@@ -168,13 +168,52 @@ def get_existing_chunks(limit: Optional[int] = None) -> list[dict]:
     return chunks
 
 
+def get_full_documents(limit: Optional[int] = None) -> list[dict]:
+    """Получить полные документы из БД (группировка по source_url).
+
+    Объединяет все чанки одного документа в один текст для передачи в LightRAG.
+    """
+    engine = _get_engine()
+
+    query = """
+        SELECT c.source_url, c.title, string_agg(c.text, ' ' ORDER BY c.created_at) as full_text, c.source_type
+        FROM chunks c
+        GROUP BY c.source_url, c.title, c.source_type
+        ORDER BY MIN(c.created_at)
+    """
+
+    if limit:
+        query += f" LIMIT {limit}"
+
+    with engine.connect() as conn:
+        result = conn.execute(text(query))
+
+        documents = []
+        for row in result:
+            documents.append({
+                "id": row.source_url or str(row.source_url),
+                "title": row.title or "Untitled",
+                "full_text": row.full_text or "",
+                "source_url": row.source_url,
+                "source_type": row.source_type,
+            })
+
+    logger.info(f"Retrieved {len(documents)} full documents from database")
+    return documents
+
+
 async def import_chunks_to_lightrag(
     chunk_ids: Optional[list[str]] = None,
     limit: Optional[int] = None,
     version_id: Optional[str] = None,
     notes: str = "",
+    use_full_documents: bool = True,
 ) -> dict:
-    """Импортировать чанки в LightRAG с версионированием и дедупликацией."""
+    """Импортировать документы в LightRAG с версионированием.
+
+    Использует Вариант А: LightRAG сам режет документы через chunk_token_size.
+    Передаём полные документы (объединённые чанки), LightRAG сам нарежет на чанки.
+    """
     from .lightrag_adapter import create_lightrag_config
     from .main import get_lightrag, is_lightrag_ready
 
@@ -182,95 +221,82 @@ async def import_chunks_to_lightrag(
 
     if not is_lightrag_ready():
         raise RuntimeError(
-            "LightRAG not initialized or not ready. Set USE_LIGHT_RAG=true"
+            "LightRAG not initialized or not ready"
         )
 
     rag = get_lightrag()
     config = create_lightrag_config()
-    model_name = config.get("model_name", "default")
+    chunk_token_size = config.get("chunk_token_size", 1024)
 
     vid = _create_version(version_id, notes)
 
-    logger.info(f"Starting import for version {vid}...")
+    logger.info(
+        f"Starting import for version {vid} (full_documents={use_full_documents}, chunk_token_size={chunk_token_size})..."
+    )
 
     if chunk_ids:
-        chunks = []
-        engine = _get_engine()
-        with engine.connect() as conn:
-            placeholders = ", ".join([f"'{cid}'" for cid in chunk_ids])
-            result = conn.execute(
-                text(f"""
-                SELECT c.id, c.text, c.title, c.source_url, c.source_type
-                FROM chunks c
-                WHERE c.id::text IN ({placeholders})
-            """)
-            )
-            for row in result:
-                chunks.append(
-                    {
-                        "id": str(row.id),
-                        "text": row.text,
-                        "title": row.title or "Untitled",
-                        "source_url": row.source_url,
-                        "source_type": row.source_type,
-                    }
-                )
-    else:
-        chunks = get_existing_chunks(limit=limit)
+        logger.warning("chunk_ids parameter is ignored in full-document import mode")
 
-    if not chunks:
+    documents = get_full_documents(limit=limit)
+
+    if not documents:
         _update_version(vid, "completed", 0, 0, 0)
-        return {"status": "no_chunks", "imported": 0, "version_id": vid}
+        return {"status": "no_documents", "imported": 0, "version_id": vid}
 
-    documents_list = []
     processed = 0
     skipped = 0
     failed = 0
-    error_messages = []
+
+    documents_list: list[str] = []
+    ids_list: list[str] = []
+    file_paths_list: list[str] = []
+    docs_to_process: list[tuple[str, str, str]] = []
 
     engine = _get_engine()
-
-    documents_list = []
-    processed = 0
-    skipped = 0
-    failed = 0
-    error_messages = []
-
-    engine = _get_engine()
-
-    chunks_to_process = []
 
     with engine.connect() as conn:
-        for chunk in chunks:
-            chunk_id = chunk["id"]
-            content = f"{chunk['title']}\n\n{chunk['text']}"
+        for doc in documents:
+            source_url = doc.get("source_url", "") or ""
+            title = doc.get("title", "Untitled") or "Untitled"
+            full_text = doc.get("full_text", "") or ""
+            content = f"{title}\n\n{full_text}"
+
+            doc_key_payload = f"{source_url}|{title}"
+            doc_key = hashlib.sha1(doc_key_payload.encode("utf-8")).hexdigest()
             content_hash = _compute_hash(content)
 
             existing = conn.execute(
                 text(
-                    "SELECT content_hash, last_indexed_version FROM lightrag_doc_registry WHERE chunk_id = :cid"
+                    "SELECT content_hash FROM lightrag_doc_registry WHERE chunk_id = :cid"
                 ),
-                {"cid": chunk_id},
+                {"cid": doc_key},
             ).fetchone()
 
             if existing and existing[0] == content_hash:
                 skipped += 1
                 continue
 
-            chunks_to_process.append((chunk_id, content))
             documents_list.append(content)
+            ids_list.append(doc_key)
+            file_paths_list.append(source_url)
+            docs_to_process.append((doc_key, content_hash, source_url))
             processed += 1
 
     try:
         if documents_list:
-            # LightRAG insert/ainsert принимает список текстов, а не словарь
-            await rag.ainsert(documents_list)
+            await rag.ainsert(
+                documents_list,
+                ids=ids_list,
+                file_paths=file_paths_list,
+                split_by_character="\n\n",
+                split_by_character_only=False,
+            )
 
             with engine.connect() as conn:
-                for chunk_id, content in chunks_to_process:
-                    content_hash = _compute_hash(content)
+                for doc_key, content_hash, _source_url in docs_to_process:
                     conn.execute(
-                        text("""
+                        text(
+                            """
                             INSERT INTO lightrag_doc_registry (chunk_id, content_hash, last_indexed_version, status)
                             VALUES (:cid, :hash, :vid, 'indexed')
                             ON CONFLICT (chunk_id) DO UPDATE SET
@@ -278,8 +304,9 @@ async def import_chunks_to_lightrag(
                                 last_indexed_version = EXCLUDED.last_indexed_version,
                                 last_indexed_at = NOW(),
                                 status = 'indexed'
-                        """),
-                        {"cid": chunk_id, "hash": content_hash, "vid": vid},
+                            """
+                        ),
+                        {"cid": doc_key, "hash": content_hash, "vid": vid},
                     )
                 conn.commit()
 
@@ -295,12 +322,11 @@ async def import_chunks_to_lightrag(
             "imported": processed,
             "skipped": skipped,
             "failed": failed,
-            "message": f"Indexed {processed} chunks. Skipped {skipped} (unchanged).",
+            "message": f"Indexed {processed} documents. Skipped {skipped} unchanged.",
         }
 
     except Exception as e:
         error_msg = str(e)[:2000]
-        error_messages.append(error_msg)
         _update_version(vid, "failed", processed, skipped, failed, error_msg)
         logger.error(f"Import failed: {e}")
         raise RuntimeError(f"Import failed: {e}")
