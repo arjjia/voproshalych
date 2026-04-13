@@ -9,6 +9,8 @@ from typing import Optional
 
 from sqlalchemy import create_engine, text
 
+from .config import get_kb_config
+
 logger = logging.getLogger(__name__)
 
 _engine = None
@@ -31,6 +33,7 @@ async def search_chunks(
     query: str,
     embedding: list[float],
     top_k: int = 5,
+    max_similarity: float | None = None,
 ) -> list[dict]:
     """Найти похожие чанки по эмбеддингу через pgvector.
 
@@ -41,11 +44,14 @@ async def search_chunks(
         query: Текст запроса пользователя
         embedding: Вектор эмбеддинга запроса
         top_k: Количество возвращаемых результатов
+        max_similarity: Максимально допустимая cosine distance
 
     Returns:
         Список чанков с текстом, источником и оценкой похожести
     """
     engine = get_engine()
+    if max_similarity is None:
+        max_similarity = get_kb_config().search_similarity_threshold
 
     embedding_str = "[" + ",".join(map(str, embedding)) + "]"
 
@@ -62,10 +68,15 @@ async def search_chunks(
                     FROM chunks c
                     JOIN embeddings e ON c.id = e.chunk_id
                     WHERE e.embedding_vector IS NOT NULL
+                      AND (e.embedding_vector <=> cast(:embedding as vector)) <= :max_similarity
                     ORDER BY e.embedding_vector <=> cast(:embedding as vector)
                     LIMIT :top_k
                 """),
-                {"embedding": embedding_str, "top_k": top_k},
+                {
+                    "embedding": embedding_str,
+                    "top_k": top_k,
+                    "max_similarity": max_similarity,
+                },
             )
 
             chunks = []
@@ -84,7 +95,12 @@ async def search_chunks(
         logger.error(f"Vector search failed: {e}")
         raise
 
-    logger.info(f"Found {len(chunks)} chunks for query: {query[:50]}...")
+    logger.info(
+        "Found %d chunks for query: %s... (max_similarity=%.3f)",
+        len(chunks),
+        query[:50],
+        max_similarity,
+    )
     return chunks
 
 

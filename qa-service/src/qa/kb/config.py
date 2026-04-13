@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
@@ -35,12 +36,14 @@ class KBConfig(BaseSettings):
         chunk_size: Максимальный размер чанка в символах
         chunk_overlap: Перекрытие между чанками в символах
         min_chunk_size: Минимальный размер чанка для сохранения
+        search_similarity_threshold: Максимальная cosine distance для retrieval
     """
 
     embedding_model: str = "deepvk/USER-bge-m3"
     chunk_size: int = 1000
     chunk_overlap: int = 200
     min_chunk_size: int = 0
+    search_similarity_threshold: float = Field(default=0.5, ge=0.0, le=2.0)
 
     model_config = SettingsConfigDict(
         env_prefix="",
