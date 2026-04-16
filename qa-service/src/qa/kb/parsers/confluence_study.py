@@ -1,17 +1,24 @@
 """Парсер для пространства Study на Confluence."""
 
+import asyncio
+import concurrent.futures
 from io import BytesIO
 import logging
+import os
 from typing import Generator
 
 import httpx
 from bs4 import BeautifulSoup
 import pdfplumber
+import pytesseract
+from PIL import Image
 
 from .base import BaseParser, ParsedDocument
-from ..config import get_kb_config
 
 logger = logging.getLogger(__name__)
+
+OCR_WORKERS = int(os.getenv("OCR_WORKERS", "4"))
+OCR_RESOLUTION = int(os.getenv("OCR_RESOLUTION", "150"))
 
 
 class ConfluenceStudyParser(BaseParser):
@@ -19,9 +26,8 @@ class ConfluenceStudyParser(BaseParser):
 
     def __init__(self):
         """Инициализирует парсер."""
-        config = get_kb_config()
-        self._host = config.confluence_host
-        self._token = config.confluence_token
+        self._host = os.getenv("CONFLUENCE_HOST", "https://confluence.utmn.ru")
+        self._token = os.getenv("CONFLUENCE_TOKEN", "")
         self._headers = {"Authorization": f"Bearer {self._token}"}
 
     async def _get_page(self, page_id: str) -> dict:
@@ -59,7 +65,13 @@ class ConfluenceStudyParser(BaseParser):
 
             if len(page_body) > 50:
                 soup = BeautifulSoup(page_body, "html.parser")
+                
                 page_content = soup.get_text(separator=" ")
+                
+                if len(page_content.strip()) < 100:
+                    logger.info(f"Skipping page {page_id} ('{title}') - content too short after cleanup")
+                    return None
+                
                 return ParsedDocument(
                     url=page_url,
                     title=title,
@@ -105,10 +117,56 @@ class ConfluenceStudyParser(BaseParser):
                 return data.get("results", [])
         return []
 
+    def _ocr_pdf_sync(self, pdf_bytes: BytesIO) -> str:
+        """Синхронный OCR для PDF (для параллельного выполнения).
+
+        Args:
+            pdf_bytes: PDF файл в памяти
+
+        Returns:
+            Распознанный текст
+        """
+        try:
+            pdf_bytes.seek(0)
+            with pdfplumber.open(pdf_bytes) as pdf:
+                pages_text = []
+                for page in pdf.pages:
+                    page_image = page.to_image(resolution=OCR_RESOLUTION)
+                    pil_image = page_image.original
+                    ocr_text = pytesseract.image_to_string(
+                        pil_image,
+                        lang="rus+eng",
+                    )
+                    if ocr_text and ocr_text.strip():
+                        pages_text.append(ocr_text.strip())
+
+                if pages_text:
+                    return "\n".join(pages_text)
+        except Exception as e:
+            logger.warning(f"OCR failed: {e}")
+
+        return ""
+
+    async def _ocr_pdf(self, pdf_bytes: BytesIO) -> str:
+        """Параллельный OCR для PDF.
+
+        Args:
+            pdf_bytes: PDF файл в памяти
+
+        Returns:
+            Распознанный текст
+        """
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_WORKERS) as executor:
+            result = await loop.run_in_executor(
+                executor, self._ocr_pdf_sync, pdf_bytes
+            )
+        return result
+
     async def _parse_page_attachments(
         self, page_id: str, title: str, page_url: str
     ) -> list[ParsedDocument]:
-        """Парсит PDF вложения страницы.
+        """Парсит PDF вложения страницы с параллельным OCR.
 
         Args:
             page_id: ID страницы
@@ -120,6 +178,8 @@ class ConfluenceStudyParser(BaseParser):
         """
         attachments = await self._get_attachments(page_id)
         documents: list[ParsedDocument] = []
+        
+        pdf_attachments = []
         for attachment in attachments:
             att_title = attachment.get("title", "")
             media_type = (
@@ -138,28 +198,43 @@ class ConfluenceStudyParser(BaseParser):
             if not download_url.startswith("http"):
                 download_url = self._host + download_url
 
+            pdf_attachments.append((att_title, download_url))
+
+        if not pdf_attachments:
+            return documents
+
+        async def download_and_ocr(att_title: str, download_url: str):
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     response = await client.get(download_url)
                     response.raise_for_status()
                     pdf_bytes = BytesIO(response.content)
 
-                with pdfplumber.open(pdf_bytes) as pdf:
-                    text_content = ""
-                    for page in pdf.pages:
-                        if page.extract_text():
-                            text_content += page.extract_text() + "\n"
+                text_content = await self._ocr_pdf(pdf_bytes)
 
-                documents.append(
-                    ParsedDocument(
+                if text_content:
+                    return ParsedDocument(
                         url=download_url,
                         title=att_title,
                         text_content=text_content,
                         source_type=self.get_source_type(),
                     )
-                )
             except Exception as e:
                 logger.error(f"Error parsing PDF {att_title}: {e}")
+            return None
+
+        semaphore = asyncio.Semaphore(2)
+
+        async def download_and_ocr_with_limit(att_title: str, download_url: str):
+            async with semaphore:
+                return await download_and_ocr(att_title, download_url)
+
+        tasks = [download_and_ocr_with_limit(title, url) for title, url in pdf_attachments]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            if result:
+                documents.append(result)
 
         return documents
 
@@ -184,7 +259,7 @@ class ConfluenceStudyParser(BaseParser):
         return all_pages
 
     async def get_documents(self, source_url: str) -> list[ParsedDocument]:
-        """Получить документы из пространства Study.
+        """Получить документы из пространства Study (ВСЕ страницы).
 
         Args:
             source_url: URL (не используется, парсит всё пространство)
@@ -195,17 +270,11 @@ class ConfluenceStudyParser(BaseParser):
         pages = await self._get_study_pages()
         logger.info(f"Found {len(pages)} pages in study space")
 
-        leaf_pages: list[dict] = []
-        for page in pages:
-            page_id = page["id"]
-            has_children = await self._has_child_pages(page_id)
-            if not has_children:
-                leaf_pages.append(page)
-
-        logger.info(f"Leaf pages (no children): {len(leaf_pages)}")
+        logger.info(f"Processing ALL pages (not only leaf): {len(pages)}")
 
         documents: list[ParsedDocument] = []
-        for page in leaf_pages:
+        
+        for page in pages:
             page_id = page["id"]
             title = page.get("title", "Untitled")
             page_url = self._host + page.get("_links", {}).get("webui", "")
