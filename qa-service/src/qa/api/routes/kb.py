@@ -197,24 +197,6 @@ async def rebuild_knowledge_graph(version_id: Optional[str] = None) -> dict:
     except Exception as e:
         logger.error(f"Knowledge graph rebuild failed: {e}")
         raise HTTPException(status_code=500, detail=f"Rebuild failed: {e}")
-    import os
-
-    if os.getenv("USE_LIGHT_RAG", "false").lower() != "true":
-        raise HTTPException(
-            status_code=400,
-            detail="LightRAG not enabled. Set USE_LIGHT_RAG=true in environment",
-        )
-
-    try:
-        from qa.lightrag_import import rebuild_knowledge_graph
-
-        result = await rebuild_knowledge_graph(version_id=version_id)
-        return result
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Knowledge graph rebuild failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Rebuild failed: {e}")
 
 
 @router.get("/index-status")

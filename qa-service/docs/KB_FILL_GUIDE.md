@@ -1,137 +1,152 @@
 # Заполнение Базы Знаний
 
-**Статус:** База знаний заполнена. В базе ~315 чанков из Confluence, Sveden и UTMN.
+**Статус:** Актуальная версия с поддержкой LightRAG.
 
-## Текущее состояние
+## Источники данных
 
-```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
-  "SELECT source_type, COUNT(*) FROM chunks GROUP BY source_type;"
-```
-
-Ожидаемый вывод:
-| source_type | count |
-|-------------|-------|
-| confluence | 7 |
-| sveden | ~87 |
-| utmn | ~90-150 |
+| Источник | Описание | Требует VPN |
+|----------|---------|-------------|
+| `confluence_study` | Пространство Study на Confluence | ✅ Да |
+| `confluence` | Страницы Confluence (политики, положения) | ✅ Да |
+| `utmn` | PDF с сайта utmn.ru | ❌ Нет |
+| `sveden` | Сведения об организации (sveden.ru) | ❌ Нет |
 
 ## Быстрый старт
 
-### 1. Подключение к корпоративной сети
-
-Для парсинга Confluence и utmn.ru необходимо подключение к корпоративной сети ТюмГУ (VPN или локальная сеть университета).
-
-### 2. Пересборка сервиса (при необходимости)
+### 1. Пересборка сервиса
 
 ```bash
 cd Submodules/voproshalych_v2
-docker compose up -d --build qa-service
+docker compose build qa-service
+docker compose up -d qa-service
 ```
 
-### 3. Запуск скрипта наполнения БЗ
+### 2. Запуск наполнения
 
+#### Все источники (полная переиндексация)
 ```bash
-cd Submodules/voproshalych_v2
-docker compose exec -T qa-service uv run python scripts/fill_kb_from_sources.py --clear
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --clear
 ```
 
-**Аргументы:**
-- `--clear` (по умолчанию) — очищает таблицы перед заполнением
-- `--resume` — продолжить с последнего места (без очистки)
-
-### 4. Запуск в фоне
+#### Конкретный источник
 
 ```bash
-docker compose exec -T qa-service sh -c "uv run python scripts/fill_kb_from_sources.py > /tmp/kb_fill.log 2>&1 &"
+# Только Confluence Study
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --clear --source confluence_study
+
+# Только Confluence (политики)
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --clear --source confluence
+
+# Только UTMN
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --clear --source utmn
+
+# Только Sveden
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --clear --source sveden
 ```
 
-### 5. Продолжение после остановки (--resume)
+## Режимы запуска
+
+| Параметр | Описание |
+|-----------|----------|
+| `--clear` | Очистить таблицы и переиндексировать с нуля |
+| `--resume` | Инкрементальная индексация (пропускает уже обработанные) |
+| `--append` | Добавить без проверки дубликатов |
+
+### Примеры использования
 
 ```bash
-docker compose exec -T qa-service uv run python scripts/fill_kb_from_sources.py --resume
+# Очистка и полная переиндексация confluence_study
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --clear --source confluence_study
+
+# Добавить новые документы к существующим (инкрементально)
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --resume --source confluence_study
+
+# Добавить документы без проверки (может создать дубликаты)
+docker exec -i voproshalych_v2-qa-service-1 uv run python scripts/fill_kb_from_sources.py --append --source confluence_study
 ```
 
-### 6. Мониторинг
+## Мониторинг
 
+### Проверить количество чанков
 ```bash
-# Проверить лог (только если запущен в фоне)
-docker compose exec -T qa-service tail -20 /tmp/kb_fill.log
-
-# Проверить наполнение БД
-docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "SELECT source_type, COUNT(*) FROM chunks GROUP BY source_type;"
-
-# Проверить текст в чанках
-docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "SELECT title, LEFT(text, 200) FROM chunks LIMIT 5;"
+docker exec voproshalych_v2-postgres-1 psql -U voproshalych -d voproshalych -c "SELECT source_type, COUNT(*) FROM chunks GROUP BY source_type;"
 ```
 
-## Что делает скрипт
+### Проверить текст в чанках
+```bash
+docker exec voproshalych_v2-postgres-1 psql -U voproshalych -d voproshalych -c "SELECT title, LENGTH(text) as len FROM chunks ORDER BY len DESC LIMIT 10;"
+```
 
-**Инкрементальное сохранение: документ за документом.**
+### Логи процесса
+```bash
+# Смотреть логи контейнера
+docker logs voproshalych_v2-qa-service-1 --tail 50
+```
 
-1. **Обрабатывает источники:**
-   - **Confluence** — 7 политик и положений ИБ (2 страницы)
-   - **Sveden** — ~87 PDF документов
-   - **UTMN** — PDF с 22 страниц
-
-2. **Для каждого документа:**
-   ```
-   Парсинг PDF (Tesseract OCR)
-         ↓
-   Создание чанков
-         ↓
-   Эмбеддинги (батчами по 5 текстов)
-         ↓
-   Сохранение в БД ✅
-   ```
-
-## Остановка скрипта
+## Конфигурация OCR (.env)
 
 ```bash
-# Перезапустить контейнер
+# Параллельные потоки для OCR (по умолчанию 4)
+OCR_WORKERS=4
+
+# Разрешение для OCR: 150-300 DPI (меньше = быстрее, больше = качественнее)
+OCR_RESOLUTION=150
+
+# Размер чанка в токенах для LightRAG
+CHUNK_TOKEN_SIZE=1024
+
+# Перекрытие чанков в токенах
+CHUNK_OVERLAP_TOKEN_SIZE=200
+```
+
+## Как работает парсинг
+
+### Confluence Study
+1. Получает все страницы пространства Study
+2. Для каждой страницы:
+   - Извлекает HTML текст (если >100 символов)
+   - Скачивает PDF вложения
+   - Запускает OCR для каждого PDF (параллельно, max 2 одновременно)
+3. Сохраняет чанки в PostgreSQL
+4. Импортирует в LightRAG
+
+### PDF парсинг
+- Использует Tesseract OCR с языками `rus+eng`
+- Параллельная обработка PDF (semaphore = 2)
+- Native text extraction + OCR fallback
+
+### LightRAG
+- Чанкинг: 1024 токена, перекрытие 200 токенов
+- Векторное хранилище: PostgreSQL (PGVector)
+- Графовое хранилище: PostgreSQL (AGE)
+
+## Остановка процесса
+
+```bash
+# Перезапустить контейнер (остановит процесс)
 docker compose restart qa-service
 
 # Или убить процесс
-docker compose exec -T qa-service pkill -f fill_kb_from_sources
+docker exec voproshalych_v2-qa-service-1 pkill -f fill_kb_from_sources
 ```
 
 ## Очистка БД вручную
 
 ```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "TRUNCATE chunks, embeddings RESTART IDENTITY CASCADE;"
+docker exec voproshalych_v2-postgres-1 psql -U voproshalych -d voproshalych -c "TRUNCATE chunks, embeddings, kb_documents_registry RESTART IDENTITY CASCADE;"
 ```
 
-## Как работает PDF парсинг
+## Устранение проблем
 
-### Tesseract OCR
+### Парсинг зависает на PDF
+- Проверьте логи: `docker logs voproshalych_v2-qa-service-1`
+- Убедитесь что VPN включён (для Confluence)
+- Попробуйте уменьшить `OCR_WORKERS=2` в .env
 
-- **Языки:** `rus+eng`
-- **Параметры:** `--oem 3 --psm 1`
-- **Разрешение:** 300 DPI
+### Ошибки подключения к Confluence
+- Проверьте VPN
+- Проверьте `CONFLUENCE_TOKEN` в .env
 
-### Почему Tesseract
-
-| Сравнение | EasyOCR | Tesseract |
-|-----------|---------|-----------|
-| Русский язык | Плохое качество | ✅ Хорошее |
-| RAM | ~1 GB | ✅ ~100 MB |
-
-## Конфигурация
-
-### Chunk размеры
-
-В `src/qa/kb/config.py`:
-- `chunk_size`: 1000 символов
-- `chunk_overlap`: 200 символов
-- `min_chunk_size`: 0
-
-### Источники
-
-Настраиваются в `scripts/fill_kb_from_sources.py`, класс `Config`:
-- `confluence_pages` — список страниц Confluence
-- `sveden_url` — страница Сведения
-- `utmn_pages` — список страниц UTMN
-
-### Фильтр Confluence
-
-`ALLOWED_PDF_TITLES` в `src/qa/kb/parsers/confluence.py` — фильтр разрешённых PDF.
+### Мало чанков после парсинга
+- Запустите с `--clear --source <источник>` для полной переиндексации
+- Проверьте что страницы не были отфильтрованы (короткий контент)
