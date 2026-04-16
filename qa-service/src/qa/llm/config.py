@@ -38,6 +38,18 @@ class LLMConfig(BaseSettings):
         lightrag_llm_model: Модель для индексации LightRAG (по умолчанию: первая из openrouter_models)
         default_temperature: Температура по умолчанию
         default_max_tokens: Максимальное количество токенов
+
+        Таймауты по моделям (секунды):
+        nemotron_timeout: Таймаут для Nemotron 3 Super (1M context)
+        qwen_timeout: Таймаут для Qwen 3.6 Plus (1M context + CoT)
+        mistral_timeout: Таймаут для Mistral Nemo
+        gigachat_timeout: Таймаут для GigaChat
+
+        Таймауты по кейсам (секунды):
+        keyword_extraction_timeout: Извлечение ключевых слов
+        query_expansion_timeout: Предобработка вопроса пользователя
+        answer_generation_timeout: Генерация ответа
+        graph_building_timeout: Построение графа знаний
     """
 
     mistral_api_key: str = Field(default="")
@@ -46,7 +58,6 @@ class LLMConfig(BaseSettings):
     openrouter_models: list[str] = Field(
         default=[
             "nvidia/nemotron-3-super-120b-a12b:free",
-            "arcee-ai/trinity-large-preview:free",
             "qwen/qwen3.6-plus:free",
         ]
     )
@@ -59,6 +70,16 @@ class LLMConfig(BaseSettings):
 
     default_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     default_max_tokens: int = Field(default=2048, ge=1)
+
+    nemotron_timeout: int = Field(default=120)
+    qwen_timeout: int = Field(default=180)
+    mistral_timeout: int = Field(default=90)
+    gigachat_timeout: int = Field(default=120)
+
+    keyword_extraction_timeout: int = Field(default=30)
+    query_expansion_timeout: int = Field(default=30)
+    answer_generation_timeout: int = Field(default=90)
+    graph_building_timeout: int = Field(default=180)
 
     model_config = SettingsConfigDict(
         env_prefix="",

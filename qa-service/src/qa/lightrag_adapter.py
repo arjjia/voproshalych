@@ -70,15 +70,36 @@ def get_lightrag_tokenizer() -> HuggingFaceTokenizer:
         _tokenizer = HuggingFaceTokenizer("deepvk/USER-bge-m3")
     return _tokenizer
 
+
 _llm_call_count = 0
 _llm_last_call_time = 0.0
-LLM_CALL_DELAY = 5.0  # seconds between LLM calls to avoid rate limiting
+LLM_CALL_DELAY = 5.0
 
 
 def _get_lightrag_llm_model() -> str:
     """Получить модель для LightRAG из конфига или env переменной."""
     config = get_llm_config()
     return config.lightrag_llm_model or os.getenv("LIGHT_RAG_LLM_MODEL", "")
+
+
+def _get_timeout_for_use_case(use_case: str) -> float:
+    """Получить таймаут для конкретного кейса использования.
+
+    Args:
+        use_case: Кейс использования (keyword_extraction, graph_building, default)
+
+    Returns:
+        Таймаут в секундах
+    """
+    config = get_llm_config()
+
+    use_case_lower = use_case.lower()
+    if "keyword" in use_case_lower:
+        return float(config.keyword_extraction_timeout)
+    elif "graph" in use_case_lower or "build" in use_case_lower:
+        return float(config.graph_building_timeout)
+    else:
+        return float(config.answer_generation_timeout)
 
 
 async def llm_model_func(
@@ -93,8 +114,16 @@ async def llm_model_func(
     Использует модель из LIGHT_RAG_LLM_MODEL если указана,
     иначе использует основной LLM Pool (openrouter → gigachat → mistral).
     Добавляет задержку между вызовами для избежания rate limiting.
+
+    Таймауты по кейсам:
+    - keyword_extraction: keyword_extraction_timeout (по умолчанию 30s)
+    - graph_building: graph_building_timeout (по умолчанию 180s)
+    - default: answer_generation_timeout (по умолчанию 90s)
     """
     global _llm_call_count, _llm_last_call_time
+
+    use_case = "keyword_extraction" if keyword_extraction else "default"
+    timeout = _get_timeout_for_use_case(use_case)
 
     current_time = asyncio.get_event_loop().time()
     time_since_last_call = current_time - _llm_last_call_time
@@ -116,26 +145,31 @@ async def llm_model_func(
         full_prompt = f"{system_prompt}\n\n{prompt}"
 
     try:
-        # Пробуем сначала указанную модель (Mistral или OpenRouter)
         if llm_model == "mistral":
             from qa.llm.providers.mistral import MistralProvider
 
             provider = MistralProvider()
             if provider.is_available():
-                logger.info("Using LightRAG model: Mistral (open-mistral-nemo)")
+                logger.info(
+                    f"Using LightRAG model: Mistral (timeout={timeout}s)"
+                )
                 try:
-                    response = await provider.generate(
-                        prompt=full_prompt,
-                        temperature=config.default_temperature,
-                        max_tokens=config.default_max_tokens,
+                    response = await asyncio.wait_for(
+                        provider.generate(
+                            prompt=full_prompt,
+                            temperature=config.default_temperature,
+                            max_tokens=config.default_max_tokens,
+                        ),
+                        timeout=timeout,
                     )
                     if response.content:
                         return response.content
+                except asyncio.TimeoutError:
+                    logger.warning(f"Mistral timeout after {timeout}s")
+                    raise
                 except Exception as e:
                     if "429" in str(e):
-                        logger.warning(
-                            "Mistral rate limited, trying OpenRouter fallback"
-                        )
+                        logger.warning("Mistral rate limited, trying OpenRouter fallback")
                     else:
                         logger.warning(f"Mistral failed: {e}")
         else:
@@ -147,26 +181,39 @@ async def llm_model_func(
             )
             if provider.is_available():
                 logger.info(
-                    f"Using LightRAG model: {llm_model or 'OpenRouter fallback'}"
+                    f"Using LightRAG model: {llm_model or 'OpenRouter fallback'} (timeout={timeout}s)"
                 )
                 try:
-                    response = await provider.generate(
-                        prompt=full_prompt,
-                        temperature=config.default_temperature,
-                        max_tokens=config.default_max_tokens,
+                    response = await asyncio.wait_for(
+                        provider.generate(
+                            prompt=full_prompt,
+                            temperature=config.default_temperature,
+                            max_tokens=config.default_max_tokens,
+                        ),
+                        timeout=timeout,
                     )
                     if response.content:
                         return response.content
+                except asyncio.TimeoutError:
+                    logger.warning(f"OpenRouter timeout after {timeout}s")
+                    raise
                 except Exception as e:
                     if "429" in str(e):
                         logger.warning(f"OpenRouter rate limited: {e}")
 
-        # Fallback: полный LLM pool (автоматически перебирает все провайдеры)
         logger.info("Falling back to LLM pool")
-        response = await llm_pool.call(prompt=full_prompt)
+        response = await asyncio.wait_for(
+            llm_pool.call(prompt=full_prompt),
+            timeout=timeout,
+        )
         if response.content:
             return response.content
         raise ValueError("LLM returned empty content")
+    except asyncio.TimeoutError:
+        logger.error(f"LLM call timeout after {timeout}s for use_case={use_case}")
+        if keyword_extraction:
+            return "[]"
+        raise
     except Exception as e:
         logger.error(f"LLM call failed in LightRAG: {e}")
         if keyword_extraction:
@@ -189,6 +236,7 @@ async def _embedding_func(texts: list[str]) -> np.ndarray:
 
 def create_lightrag_config() -> dict:
     """Создать конфигурацию для LightRAG."""
+    config = get_llm_config()
     return {
         "working_dir": os.getenv("LIGHT_RAG_WORKING_DIR", "/app/lightrag_data"),
         "storage_type": os.getenv("LIGHT_RAG_STORAGE_TYPE", "PostgreSQL"),

@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from ...config.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_WITH_CONTEXT, QUERY_EXPAND_PROMPT
 from ...models.request import QARequest, QAResponse
 from ...llm import get_llm_pool
+from ...llm.config import get_llm_config
 
 nest_asyncio.apply()
 
@@ -17,8 +18,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 
-LIGHTRAG_TIMEOUT_SECONDS = 20
-QUERY_EXPANSION_TIMEOUT_SECONDS = 10
+
+def _get_timeouts() -> dict:
+    """Получить таймауты из конфига.
+
+    Returns:
+        Словарь с таймаутами для разных операций
+    """
+    config = get_llm_config()
+    return {
+        "lightrag": config.answer_generation_timeout,
+        "query_expansion": config.query_expansion_timeout,
+    }
 
 
 async def expand_question(question: str) -> str:
@@ -30,6 +41,9 @@ async def expand_question(question: str) -> str:
     Returns:
         расширенный запрос для поиска (или оригинальный вопрос при ошибке)
     """
+    config = get_llm_config()
+    timeout = config.query_expansion_timeout
+
     llm_pool = get_llm_pool()
     provider_name = llm_pool.select_model()
     if not provider_name:
@@ -40,13 +54,13 @@ async def expand_question(question: str) -> str:
         prompt = f"{QUERY_EXPAND_PROMPT}\n\nВопрос студента: {question}\n\nРасширенный запрос:"
         response = await asyncio.wait_for(
             llm_pool.call(prompt=prompt),
-            timeout=QUERY_EXPANSION_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
         expanded = response.content.strip()
         logger.info(f"Expanded query: {expanded[:100]}...")
         return expanded
     except asyncio.TimeoutError:
-        logger.warning(f"Query expansion timeout after {QUERY_EXPANSION_TIMEOUT_SECONDS}s")
+        logger.warning(f"Query expansion timeout after {timeout}s")
         return question
     except Exception as e:
         logger.warning(f"Query expansion failed: {e}")
@@ -60,6 +74,8 @@ async def ask_question(request: QARequest) -> QAResponse:
     Всегда использует LightRAG с гибридным поиском (vector + graph).
     Сначала расширяет вопрос для лучшего поиска.
     """
+    config = get_llm_config()
+    timeouts = _get_timeouts()
     start_time = time.time()
 
     if not is_lightrag_ready():
@@ -75,7 +91,7 @@ async def ask_question(request: QARequest) -> QAResponse:
         rag = get_lightrag()
         result = await asyncio.wait_for(
             rag.aquery(request.question, param=QueryParam(mode="mix")),
-            timeout=LIGHTRAG_TIMEOUT_SECONDS,
+            timeout=timeouts["lightrag"],
         )
         elapsed = time.time() - start_time
         logger.info(f"LightRAG query completed in {elapsed:.2f}s")
@@ -88,7 +104,7 @@ async def ask_question(request: QARequest) -> QAResponse:
         )
 
     except asyncio.TimeoutError:
-        logger.error(f"LightRAG timeout after {LIGHTRAG_TIMEOUT_SECONDS}s")
+        logger.error(f"LightRAG timeout after {timeouts['lightrag']}s")
         raise HTTPException(
             status_code=503,
             detail="Сервис временно перегружен. Попробуйте повторить запрос позже.",

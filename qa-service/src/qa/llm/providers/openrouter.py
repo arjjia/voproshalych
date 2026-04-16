@@ -9,6 +9,83 @@ from ..config import get_llm_config
 
 logger = logging.getLogger(__name__)
 
+RETRY_STATUS_CODES = (429, 502, 503, 504, 408)
+NO_RETRY_STATUS_CODES = (400, 401, 402, 403)
+
+
+def _get_timeout_for_model(model: str, config) -> float:
+    """Получить таймаут для конкретной модели.
+
+    Args:
+        model: Идентификатор модели
+        config: Конфигурация LLM
+
+    Returns:
+        Таймаут в секундах
+    """
+    model_lower = model.lower()
+
+    if "nemotron" in model_lower:
+        return float(config.nemotron_timeout)
+    elif "qwen" in model_lower:
+        return float(config.qwen_timeout)
+    elif "openrouter/free" in model_lower:
+        return 120.0
+    else:
+        return 60.0
+
+
+async def _retry_with_backoff(
+    func,
+    max_retries: int = 3,
+    backoff_factor: float = 1.0,
+):
+    """Выполнить запрос с retry и экспоненциальным backoff.
+
+    Args:
+        func: Асинхронная функция для выполнения
+        max_retries: Максимальное количество попыток
+        backoff_factor: Коэффициент backoff
+
+    Returns:
+        Результат выполнения функции
+
+    Raises:
+        Exception: Последняя ошибка после исчерпания попыток
+    """
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            return await func()
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+
+            if status_code in NO_RETRY_STATUS_CODES:
+                raise
+
+            last_error = e
+            if attempt < max_retries - 1:
+                wait_time = backoff_factor * (2 ** attempt)
+                logger.warning(
+                    f"HTTP {status_code}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
+                )
+                import asyncio
+
+                await asyncio.sleep(wait_time)
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                wait_time = backoff_factor * (2 ** attempt)
+                logger.warning(
+                    f"Error: {e}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
+                )
+                import asyncio
+
+                await asyncio.sleep(wait_time)
+
+    raise last_error
+
 
 class OpenRouterProvider(BaseLLMProvider):
     """Провайдер OpenRouter.
@@ -63,6 +140,9 @@ class OpenRouterProvider(BaseLLMProvider):
         Raises:
             httpx.HTTPStatusError: При ошибке API
         """
+        config = get_llm_config()
+        timeout = _get_timeout_for_model(model, config)
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self._api_key}",
@@ -77,27 +157,32 @@ class OpenRouterProvider(BaseLLMProvider):
             "max_tokens": max_tokens,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
+        backoff_factor = 1.0 if "qwen" not in model.lower() else 2.0
 
-            data = response.json()
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
 
-            return LLMResponse(
-                content=data["choices"][0]["message"]["content"],
-                model=data.get("model", model),
-                usage={
-                    "prompt_tokens": data.get("usage", {}).get("prompt_tokens", 0),
-                    "completion_tokens": data.get("usage", {}).get(
-                        "completion_tokens", 0
-                    ),
-                    "total_tokens": data.get("usage", {}).get("total_tokens", 0),
-                },
-            )
+                data = response.json()
+
+                return LLMResponse(
+                    content=data["choices"][0]["message"]["content"],
+                    model=data.get("model", model),
+                    usage={
+                        "prompt_tokens": data.get("usage", {}).get("prompt_tokens", 0),
+                        "completion_tokens": data.get("usage", {}).get(
+                            "completion_tokens", 0
+                        ),
+                        "total_tokens": data.get("usage", {}).get("total_tokens", 0),
+                    },
+                )
+
+        return await _retry_with_backoff(_make_request, max_retries=3, backoff_factor=backoff_factor)
 
     async def generate(
         self,

@@ -42,7 +42,7 @@ class TestOpenRouterProvider:
 
         assert provider.name == "openrouter"
         assert provider._api_key == "test-key"
-        assert provider._model == "openrouter/free"
+        assert len(provider._models) > 0
 
     def test_is_available_with_key(self):
         """Тест доступности с ключом."""
@@ -68,8 +68,7 @@ class TestGigaChatProvider:
         )
 
         assert provider.name == "gigachat"
-        assert provider._client_id == "test-id"
-        assert provider._client_secret == "test-secret"
+        assert provider._auth_key is not None
         assert provider._model == "GigaChat"
 
     def test_is_available_with_credentials(self):
@@ -80,6 +79,7 @@ class TestGigaChatProvider:
         )
 
         assert provider.is_available() is True
+        assert provider._auth_key is not None
 
     def test_is_available_without_client_id(self):
         """Тест доступности без client_id."""
