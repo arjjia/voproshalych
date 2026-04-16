@@ -288,8 +288,6 @@ async def import_chunks_to_lightrag(
                 documents_list,
                 ids=ids_list,
                 file_paths=file_paths_list,
-                split_by_character="\n\n",
-                split_by_character_only=False,
             )
 
             with engine.connect() as conn:
@@ -337,7 +335,7 @@ async def rebuild_knowledge_graph(version_id: Optional[str] = None) -> dict:
     from .main import get_lightrag, is_lightrag_ready
 
     if not is_lightrag_ready():
-        raise RuntimeError("LightRAG not initialized. Set USE_LIGHT_RAG=true")
+        raise RuntimeError("LightRAG not initialized")
 
     rag = get_lightrag()
     vid = version_id or f"kg-{datetime.now().strftime('%Y%m%d-%H%M%S')}"

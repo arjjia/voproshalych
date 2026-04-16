@@ -37,14 +37,6 @@ def is_lightrag_ready() -> bool:
     return _lightrag_ready
 
 
-def is_lightrag_enabled() -> bool:
-    """Проверить, включен ли LightRAG.
-
-    LightRAG всегда включен (гибридный поиск: вектора + граф).
-    """
-    return True
-
-
 async def init_lightrag():
     """Инициализировать LightRAG с PGGraphStorage и PGVectorStorage."""
     global _lightrag, _lightrag_ready
@@ -72,6 +64,7 @@ async def init_lightrag():
         # NetworkXStorage is fallback when AGE is not available
         use_pg_graph = config.get("use_pg_graph", True)
         chunk_token_size = config.get("chunk_token_size", 1024)
+        chunk_overlap_token_size = config.get("chunk_overlap_token_size", 200)
         tokenizer = config.get("tokenizer")
 
         _lightrag = LightRAG(
@@ -86,6 +79,7 @@ async def init_lightrag():
             graph_storage="PGGraphStorage" if use_pg_graph else "NetworkXStorage",
             vector_storage="PGVectorStorage" if storage_type == "PostgreSQL" else None,
             chunk_token_size=chunk_token_size,
+            chunk_overlap_token_size=chunk_overlap_token_size,
             tokenizer=tokenizer,
         )
 
@@ -133,7 +127,7 @@ def create_app() -> FastAPI:
     """Создать и настроить приложение FastAPI."""
     app = FastAPI(
         title="QA Service",
-        description="QA Service with LLM Pool, LightRAG and Classic RAG",
+        description="QA Service with LightRAG (hybrid vector + graph search)",
         version="0.1.0",
         lifespan=lifespan,
     )

@@ -735,7 +735,7 @@ async def main(mode: str, source_filter: str) -> None:
             except Exception:
                 pass
 
-    skip_existing = mode != "append"
+    skip_existing = mode == "resume"  # Пропускать только в resume режиме
 
     config = Config()
 
@@ -783,25 +783,6 @@ async def main(mode: str, source_filter: str) -> None:
     logger.info(f"Заполнение завершено!")
     logger.info(f"Всего документов: {total_docs}")
     logger.info(f"Всего чанков сохранено: {total_chunks}")
-    logger.info("=" * 50)
-
-    # Импорт чанков в LightRAG (гибридный поиск: вектора + граф)
-    try:
-        logger.info("")
-        logger.info("=" * 50)
-        logger.info("Импорт чанков в LightRAG...")
-
-        os.environ["USE_LIGHT_RAG"] = "true"
-
-        from qa.lightrag_import import import_chunks_to_lightrag
-        import_result = await import_chunks_to_lightrag(
-            version_id=None,
-            notes=f"Index mode={mode}, source={source_filter}: {total_chunks} chunks, {total_docs} docs"
-        )
-        logger.info(f"LightRAG import: {import_result}")
-    except Exception as e:
-        logger.warning(f"LightRAG import failed (will continue): {e}")
-
     logger.info("=" * 50)
 
 
