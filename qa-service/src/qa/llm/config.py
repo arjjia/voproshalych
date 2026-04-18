@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from dotenv import load_dotenv
 
@@ -87,6 +87,17 @@ class LLMConfig(BaseSettings):
         env_prefix="",
         case_sensitive=False,
     )
+
+    @field_validator("openrouter_models", "model_priority", mode="before")
+    @classmethod
+    def _parse_csv_list(cls, value: object) -> object:
+        """Разрешить передавать списки в env как строку с запятыми."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
 
 def get_llm_config() -> LLMConfig:
