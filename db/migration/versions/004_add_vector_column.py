@@ -53,9 +53,12 @@ def upgrade() -> None:
         Конвертация из JSON работает если данные хранились как массив чисел.
         Если данные в другом формате, миграция может потребовать корректировки.
     """
+    # Убедиться, что расширение pgvector установлено
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
     # Добавить векторную колонку
     op.execute("""
-        ALTER TABLE embeddings 
+        ALTER TABLE embeddings
         ADD COLUMN embedding_vector vector(1024)
     """)
 
