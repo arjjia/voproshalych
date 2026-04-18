@@ -52,8 +52,8 @@ class LLMConfig(BaseSettings):
         graph_building_timeout: Построение графа знаний
     """
 
-    mistral_api_key: str = Field(default="")
-    mistral_model: str = Field(default="open-mistral-nemo")
+    mistral_api_key: str = Field(default="", validation_alias="MISTRAL_API_KEY")
+    mistral_model: str = Field(default="open-mistral-nemo", validation_alias="MISTRAL_MODEL")
     openrouter_api_key: str = Field(default="")
     openrouter_models: list[str] = Field(
         default=[
@@ -67,19 +67,21 @@ class LLMConfig(BaseSettings):
 
     model_priority: list[str] = Field(default=["openrouter", "gigachat", "mistral"])
     lightrag_llm_model: str = Field(default="")
+    ollama_base_url: str = Field(default="http://localhost:11434")
+    ollama_model: str = Field(default="gemma4:e4b")
 
     default_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     default_max_tokens: int = Field(default=2048, ge=1)
 
     nemotron_timeout: int = Field(default=120)
     qwen_timeout: int = Field(default=180)
-    mistral_timeout: int = Field(default=90)
+    mistral_timeout: int = Field(default=600)
     gigachat_timeout: int = Field(default=120)
 
     keyword_extraction_timeout: int = Field(default=30)
     query_expansion_timeout: int = Field(default=30)
-    answer_generation_timeout: int = Field(default=90)
-    graph_building_timeout: int = Field(default=180)
+    answer_generation_timeout: int = Field(default=600)
+    graph_building_timeout: int = Field(default=600)
 
     model_config = SettingsConfigDict(
         env_prefix="",
