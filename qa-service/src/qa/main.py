@@ -42,6 +42,11 @@ async def init_lightrag():
     global _lightrag, _lightrag_ready
 
     try:
+        # LightRAG читает POSTGRES_DATABASE, а compose передаёт POSTGRES_DB —
+        # проксируем имя, чтобы не дублировать переменные окружения.
+        if "POSTGRES_DATABASE" not in os.environ and "POSTGRES_DB" in os.environ:
+            os.environ["POSTGRES_DATABASE"] = os.environ["POSTGRES_DB"]
+
         from lightrag import LightRAG
         from lightrag.utils import EmbeddingFunc
         from .lightrag_adapter import (
