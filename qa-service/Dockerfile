@@ -14,7 +14,7 @@ COPY pyproject.toml ./
 ENV UV_SYSTEM_PYTHON=1
 ENV UV_LINK_MODE=copy
 
-RUN uv pip install --system langchain-core langchain-text-splitters pydantic-settings
+RUN uv pip install --system langchain-core langchain-text-splitters pydantic-settings gigachat
 
 RUN uv sync
 

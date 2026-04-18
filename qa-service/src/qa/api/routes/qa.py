@@ -69,11 +69,13 @@ async def expand_question(question: str) -> str:
 
 @router.post("", response_model=QAResponse)
 async def ask_question(request: QARequest) -> QAResponse:
-    """Задать вопрос через LightRAG (гибридный поиск: вектора + граф).
+    """Задать вопрос QA системе с LightRAG.
 
-    Всегда использует LightRAG с гибридным поиском (vector + graph).
     Сначала расширяет вопрос для лучшего поиска.
     """
+    from lightrag import QueryParam
+    from ...main import get_lightrag, is_lightrag_ready
+
     config = get_llm_config()
     timeouts = _get_timeouts()
     start_time = time.time()
@@ -83,11 +85,12 @@ async def ask_question(request: QARequest) -> QAResponse:
 
     try:
         expanded_query = await expand_question(request.question)
-        logger.info(f"Expanded query: {expanded_query[:100]}...")
+        if expanded_query and len(expanded_query) > 5000:
+            logger.warning(f"Expanded query truncated from {len(expanded_query)} to 5000 characters")
+            expanded_query = expanded_query[:5000]
+        logger.info(f"Expanded query: {(expanded_query[:100] + '...') if expanded_query else 'None'}")
 
         logger.info(f"Querying LightRAG for: {request.question[:50]}...")
-        from lightrag import QueryParam
-        from ...main import get_lightrag, is_lightrag_ready
         rag = get_lightrag()
         result = await asyncio.wait_for(
             rag.aquery(request.question, param=QueryParam(mode="mix")),

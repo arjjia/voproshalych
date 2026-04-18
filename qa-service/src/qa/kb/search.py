@@ -1,32 +1,15 @@
-"""Векторный поиск в Базе Знаний.
+"""Векторный поиск в Базе Знаний через LightRAG.
 
-Осуществляет семантический поиск по чанкам с использованием pgvector
-для косинусного сходства на уровне PostgreSQL.
+Осуществляет семантический поиск по документам используя LightRAG
+vector storage с косинусным сходством.
 """
 
 import logging
 from typing import Optional
 
-from sqlalchemy import create_engine, text
-
 from .config import get_kb_config
 
 logger = logging.getLogger(__name__)
-
-_engine = None
-
-
-def get_engine():
-    """Получить движок подключения к БД.
-
-    Returns:
-        SQLAlchemy Engine
-    """
-    global _engine
-    if _engine is None:
-        db_url = "postgresql://voproshalych:voproshalych@postgres:5432/voproshalych"
-        _engine = create_engine(db_url)
-    return _engine
 
 
 async def search_chunks(
@@ -35,71 +18,60 @@ async def search_chunks(
     top_k: int = 5,
     max_similarity: float | None = None,
 ) -> list[dict]:
-    """Найти похожие чанки по эмбеддингу через pgvector.
+    """Найти похожие документы через LightRAG vector storage.
 
-    Использует оператор <=> (косинусное сходство) на уровне PostgreSQL
-    для эффективного поиска без загрузки всех данных в память.
+    Использует LightRAG для поиска по векторам с косинусным сходством.
 
     Args:
-        query: Текст запроса пользователя
+        query: Текст запроса пользователя (для логирования)
         embedding: Вектор эмбеддинга запроса
         top_k: Количество возвращаемых результатов
-        max_similarity: Максимально допустимая cosine distance
+        max_similarity: Порог косинусного сходства (не используется,
+                        оставлен для совместимости API)
 
     Returns:
-        Список чанков с текстом, источником и оценкой похожести
+        Список документов с текстом, источником и оценкой похожести
     """
-    engine = get_engine()
+    from ..main import get_lightrag, is_lightrag_ready
+
+    if not is_lightrag_ready():
+        raise RuntimeError("LightRAG not initialized")
+
     if max_similarity is None:
         max_similarity = get_kb_config().search_similarity_threshold
 
-    embedding_str = "[" + ",".join(map(str, embedding)) + "]"
+    rag = get_lightrag()
 
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT 
-                        c.id, 
-                        c.text, 
-                        c.title, 
-                        c.source_url,
-                        (e.embedding_vector <=> cast(:embedding as vector)) as similarity
-                    FROM chunks c
-                    JOIN embeddings e ON c.id = e.chunk_id
-                    WHERE e.embedding_vector IS NOT NULL
-                      AND (e.embedding_vector <=> cast(:embedding as vector)) <= :max_similarity
-                    ORDER BY e.embedding_vector <=> cast(:embedding as vector)
-                    LIMIT :top_k
-                """),
+        results = await rag.asearch(
+            query=query,
+            top_k=top_k,
+        )
+
+        chunks = []
+        for i, item in enumerate(results):
+            text = item.get("text", "")
+            title = item.get("title", item.get("name", "Untitled"))
+            source_url = item.get("url", item.get("file_path", ""))
+
+            chunks.append(
                 {
-                    "embedding": embedding_str,
-                    "top_k": top_k,
-                    "max_similarity": max_similarity,
-                },
+                    "id": str(i),
+                    "text": text,
+                    "title": title,
+                    "source_url": source_url,
+                    "similarity": 1.0 - (item.get("distance", 0.0)),
+                }
             )
 
-            chunks = []
-            for row in result:
-                chunks.append(
-                    {
-                        "id": str(row.id),
-                        "text": row.text,
-                        "title": row.title,
-                        "source_url": row.source_url,
-                        "similarity": float(row.similarity) if row.similarity else 0.0,
-                    }
-                )
-
     except Exception as e:
-        logger.error(f"Vector search failed: {e}")
+        logger.error(f"LightRAG search failed: {e}")
         raise
 
     logger.info(
-        "Found %d chunks for query: %s... (max_similarity=%.3f)",
+        "Found %d documents for query: %s...",
         len(chunks),
         query[:50],
-        max_similarity,
     )
     return chunks
 
