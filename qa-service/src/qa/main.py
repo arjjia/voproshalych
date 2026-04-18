@@ -78,9 +78,13 @@ async def init_lightrag():
             ),
             graph_storage="PGGraphStorage" if use_pg_graph else "NetworkXStorage",
             vector_storage="PGVectorStorage" if storage_type == "PostgreSQL" else None,
+            kv_storage="PGKVStorage" if storage_type == "PostgreSQL" else None,
+            doc_status_storage="PGDocStatusStorage" if storage_type == "PostgreSQL" else None,
             chunk_token_size=chunk_token_size,
             chunk_overlap_token_size=chunk_overlap_token_size,
             tokenizer=tokenizer,
+            llm_model_max_async=1,
+            embedding_func_max_async=1,
         )
 
         if storage_type == "PostgreSQL":
