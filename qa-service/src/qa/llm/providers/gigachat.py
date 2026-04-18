@@ -56,6 +56,48 @@ class GigaChatProvider(BaseLLMProvider):
         """Проверить доступность провайдера."""
         return bool(self._auth_key and self._auth_key != ":")
 
+    async def health_check(self) -> dict:
+        """Проверить доступность и здоровье GigaChat API.
+
+        Returns:
+            dict с ключами:
+                - status: 'ok' | 'error' | 'unavailable'
+                - message: описание результата
+                - latency_ms: время отклика в миллисекундах
+                - error: детали ошибки если есть
+        """
+        if not self._auth_key or self._auth_key == ":":
+            return {"status": "unavailable", "message": "No credentials configured", "latency_ms": 0, "error": None}
+
+        import time
+        try:
+            start_time = time.time()
+            client = self._get_client()
+
+            def _sync_health():
+                return client.chat(
+                    {
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "temperature": 0.7,
+                        "max_tokens": 1,
+                    }
+                )
+
+            result = await asyncio.get_event_loop().run_in_executor(None, _sync_health)
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            if result and result.choices:
+                return {"status": "ok", "message": "GigaChat API is accessible", "latency_ms": latency_ms, "error": None}
+            else:
+                return {"status": "error", "message": "Empty response", "latency_ms": latency_ms, "error": "No choices in response"}
+
+        except Exception as e:
+            latency_ms = int((time.time() - start_time) * 1000) if start_time else 0
+            error_msg = str(e)
+            if "credentials" in error_msg.lower() or "auth" in error_msg.lower():
+                return {"status": "unavailable", "message": "Authentication failed", "latency_ms": latency_ms, "error": error_msg}
+            return {"status": "error", "message": f"Request failed: {e}", "latency_ms": latency_ms, "error": error_msg}
+
     def _get_client(self) -> GigaChat:
         """Получить или создать клиент GigaChat.
 
@@ -90,6 +132,7 @@ class GigaChatProvider(BaseLLMProvider):
         Raises:
             Exception: При ошибке API
         """
+        logger.info(f"GigaChat request: prompt_len={len(prompt)} chars, timeout={self._timeout}s")
         backoff_factor = 0.5
 
         async def _make_request():

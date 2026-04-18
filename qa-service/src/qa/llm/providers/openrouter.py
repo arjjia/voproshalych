@@ -1,6 +1,7 @@
 """OpenRouter провайдер."""
 
 import logging
+import time
 
 import httpx
 
@@ -122,6 +123,57 @@ class OpenRouterProvider(BaseLLMProvider):
     def is_available(self) -> bool:
         """Проверить доступность провайдера."""
         return bool(self._api_key)
+
+    async def health_check(self, model: str | None = None) -> dict:
+        """Проверить доступность и здоровье OpenRouter API для конкретной модели.
+
+        Args:
+            model: Модель для проверки (по умолчанию первая из списка)
+
+        Returns:
+            dict с ключами:
+                - status: 'ok' | 'error' | 'unavailable'
+                - message: описание результата
+                - latency_ms: время отклика в миллисекундах
+                - error: детали ошибки если есть
+        """
+        if not self._api_key:
+            return {"status": "unavailable", "message": "No API key configured", "latency_ms": 0, "error": None}
+
+        check_model = model or self._models[0] if self._models else self._fallback_model
+
+        try:
+            start_time = time.time()
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://voproshalych.utmn.ru",
+                        "X-Title": "Voproshalych",
+                    },
+                    json={
+                        "model": check_model,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1,
+                    },
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                if response.status_code == 200:
+                    return {"status": "ok", "message": f"OpenRouter ({check_model}) is accessible", "latency_ms": latency_ms, "error": None}
+                elif response.status_code == 401:
+                    return {"status": "unavailable", "message": "Invalid API key", "latency_ms": latency_ms, "error": "401 Unauthorized"}
+                else:
+                    return {"status": "error", "message": f"HTTP {response.status_code}", "latency_ms": latency_ms, "error": response.text[:200]}
+
+        except httpx.ConnectError as e:
+            return {"status": "unavailable", "message": "Connection failed", "latency_ms": 0, "error": str(e)}
+        except httpx.TimeoutException:
+            return {"status": "error", "message": "Request timeout", "latency_ms": 15000, "error": "Timeout"}
+        except Exception as e:
+            return {"status": "error", "message": f"Unexpected error: {e}", "latency_ms": 0, "error": str(e)}
 
     async def _call_api(
         self, model: str, prompt: str, temperature: float, max_tokens: int
