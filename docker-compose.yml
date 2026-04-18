@@ -168,6 +168,48 @@ services:
       bot-core:
         condition: service_healthy
 
+  admin-service:
+    build:
+      context: ./admin-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      ADMIN_AUTH_USERNAME: ${ADMIN_AUTH_USERNAME}
+      ADMIN_AUTH_PASSWORD: ${ADMIN_AUTH_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  admin-ui:
+    build:
+      context: ./admin-ui
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_UI_PORT:-8080}:80"
+    depends_on:
+      admin-service:
+        condition: service_healthy
+
 volumes:
   postgres_data:
 
