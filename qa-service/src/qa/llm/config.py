@@ -1,8 +1,9 @@
 """Конфигурация LLM пула."""
 
 from pathlib import Path
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic import Field, field_validator
 
 from dotenv import load_dotenv
@@ -55,7 +56,7 @@ class LLMConfig(BaseSettings):
     mistral_api_key: str = Field(default="", validation_alias="MISTRAL_API_KEY")
     mistral_model: str = Field(default="open-mistral-nemo", validation_alias="MISTRAL_MODEL")
     openrouter_api_key: str = Field(default="")
-    openrouter_models: list[str] = Field(
+    openrouter_models: Annotated[list[str], NoDecode] = Field(
         default=[
             "nvidia/nemotron-3-super-120b-a12b:free",
             "qwen/qwen3.6-plus:free",
@@ -65,7 +66,9 @@ class LLMConfig(BaseSettings):
     gigachat_client_id: str = Field(default="")
     gigachat_client_secret: str = Field(default="")
 
-    model_priority: list[str] = Field(default=["openrouter", "gigachat", "mistral"])
+    model_priority: Annotated[list[str], NoDecode] = Field(
+        default=["openrouter", "gigachat", "mistral"]
+    )
     lightrag_llm_model: str = Field(default="")
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="gemma4:e4b")
