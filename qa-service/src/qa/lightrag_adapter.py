@@ -145,7 +145,31 @@ async def llm_model_func(
         full_prompt = f"{system_prompt}\n\n{prompt}"
 
     try:
-        if llm_model == "mistral":
+        if llm_model == "ollama":
+            from qa.llm.providers.ollama import OllamaProvider
+
+            provider = OllamaProvider()
+            if provider.is_available():
+                logger.info(
+                    f"Using LightRAG model: Ollama/{provider._model}"
+                )
+                try:
+                    response = await asyncio.wait_for(
+                        provider.generate(
+                            prompt=full_prompt,
+                            temperature=config.default_temperature,
+                            max_tokens=config.default_max_tokens,
+                        ),
+                        timeout=timeout,
+                    )
+                    if response.content:
+                        return response.content
+                except asyncio.TimeoutError:
+                    logger.warning(f"Ollama timeout after {timeout}s")
+                    raise
+                except Exception as e:
+                    logger.warning(f"Ollama failed: {e}")
+        elif llm_model == "mistral":
             from qa.llm.providers.mistral import MistralProvider
 
             provider = MistralProvider()
