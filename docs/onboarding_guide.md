@@ -29,15 +29,15 @@ cp .env.example .env
   3. Включите Long Poll API для бота.
   4. Создайте ключ доступа сообщества и вставьте в `.env`.
 
-- `MISTRAL_API_KEY`:
-  1. Зайдите на `mistral.ai`.
-  2. Откройте `Try AI Studio -> API Keys`.
-  3. Создайте ключ и вставьте в `.env`.
-
 - `OPENROUTER_API_KEY`:
   1. Зайдите на `openrouter.ai`.
   2. Создайте API key.
   3. Вставьте ключ в `.env`.
+
+- `MISTRAL_API_KEY`:
+  1. Зайдите на `mistral.ai`.
+  2. Откройте `Try AI Studio -> API Keys`.
+  3. Создайте ключ и вставьте в `.env`.
 
 - `GIGACHAT_CLIENT_ID` и `GIGACHAT_CLIENT_SECRET`:
   1. Получите доступ у ответственных за интеграцию GigaChat.
@@ -54,9 +54,78 @@ cp .env.example .env
 
 4. Базовые переменные БД (`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`) можно оставить значениями из шаблона для локальной разработки.
 
-## Шаг 2: Запуск сервисов
+## Шаг 2: Запуск сервисов с нуля + импорт дампа БД
 
-Запустите сервисы в одном из режимов:
+Если у вас есть дамп базы данных (например, `dump/voproshalych_20260419_174256.dump`), следуйте этой процедуре для полного поднятия проекта.
+
+### 2.1. Остановить всё и удалить старые данные
+
+```bash
+docker compose down -v
+```
+
+Это остановит все контейнеры и удалит Docker-том с базой данных. Старые данные будут полностью очищены.
+
+### 2.2. Запустить ТОЛЬКО PostgreSQL
+
+```bash
+docker compose up -d postgres
+```
+
+Дождитесь статуса `healthy`:
+
+```bash
+docker compose ps
+# postgres должен показать "(healthy)"
+```
+
+### 2.3. Импортировать дамп
+
+Для дампа в custom format (`.dump`, создан через `pg_dump -Fc`):
+
+```bash
+docker compose exec -T postgres pg_restore \
+  -U voproshalych \
+  -d voproshalych \
+  --no-owner \
+  --no-privileges \
+  --clean --if-exists \
+  < dump/voproshalych_20260419_174256.dump
+```
+
+> **Важно:** Флаг `--no-owner --no-privileges` нужен чтобы не было ошибок с правами.
+> Флаг `--clean --if-exists` безопасно удаляет существующие объекты перед восстановлением.
+
+Для дампа в SQL format (`.sql`, создан через `pg_dump` без `-Fc`):
+
+```bash
+docker compose exec -T postgres psql -U voproshalych -d voproshalych < dump/voproshalych_YYYYMMDD.sql
+```
+
+Если при импорте SQL-дампа возникают ошибки "multiple primary keys" или "already exists":
+
+```bash
+docker compose exec -T postgres psql -U voproshalych -d voproshalych \
+  -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+docker compose exec -T postgres psql -U voproshalych -d voproshalych < dump/voproshalych_YYYYMMDD.sql
+```
+
+### 2.4. Запустить миграции (пропустить уже применённые)
+
+Alembic автоматически определит, какие миграции уже применены, и выполнит только недостающие:
+
+```bash
+docker compose up -d db-migrate
+docker compose logs db-migrate --tail 10
+# Должно показать "Running upgrade N -> N+1" только для новых миграций
+# или ничего, если все миграции уже в дампе
+```
+
+### 2.5. Запустить остальные сервисы
+
+```bash
+docker compose up -d --build qa-service bot-core telegram-bot vk-bot
+```
 
 - Полный запуск (с MAX-ботом):
 
@@ -64,86 +133,41 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-- Запуск без MAX-бота (если `MAX_BOT_TOKEN` не задан):
+### 2.6. Проверить работоспособность
 
 ```bash
-docker compose up -d --build postgres db-migrate qa-service bot-core telegram-bot vk-bot
-```
-
-- Только backend-контур (без платформенных ботов):
-
-```bash
-docker compose up -d --build postgres db-migrate qa-service bot-core
-```
-
-## Проверка работоспособности
-
-Проверка статуса сервисов:
-
-```bash
+# Статус всех сервисов
 docker compose ps
-```
 
-Проверка `qa-service`:
-
-```bash
+# qa-service health
 curl http://localhost:8004/health
+
+# Тестовый запрос к QA
+curl -X POST http://localhost:8004/qa \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Какие правила приема в магистратуру?"}'
 ```
 
-Тест запроса к QA:
+## Экспорт дампа (бэкап)
+
+### Custom format (рекомендуется, для `pg_restore`)
 
 ```bash
-curl -X POST http://localhost:8004/qa -H "Content-Type: application/json" -d '{"question":"Какие правила приема в магистратуру?"}'
+docker compose exec -T postgres pg_dump \
+  -U voproshalych \
+  -d voproshalych \
+  -Fc \
+  > dump/voproshalych_$(date +%Y%m%d_%H%M%S).dump
 ```
 
-## Бэкап базы данных
-
-### Экспорт
-
-Создание дампа с командами DROP (для последующего чистого импорта):
+### SQL format (для `psql`)
 
 ```bash
-docker compose exec -T postgres pg_dump -U voproshalych -d voproshalych --clean > voproshalych_db_$(date +%Y%m%d).sql
+docker compose exec -T postgres pg_dump \
+  -U voproshalych \
+  -d voproshalych \
+  --clean \
+  > dump/voproshalych_$(date +%Y%m%d).sql
 ```
 
-### Импорт
-
-**Вариант 1: База пустая или таблицы не нужны**
-
-```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql
-```
-
-**Вариант 2: База уже содержит таблицы (создает ошибки "multiple primary keys")**
-
-Сначала очистите все таблицы в схеме public:
-
-```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
-```
-
-Затем импортируйте дамп:
-
-```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql
-```
-
-**Вариант 3: Импорт в новую чистую базу**
-
-1. Удалите том Docker с базой данных:
-
-```bash
-docker compose down -v
-```
-
-2. Запустите контейнеры заново:
-
-```bash
-docker compose up -d postgres
-```
-
-3. Дождитесь готовности PostgreSQL (10-15 секунд), затем импортируйте:
-
-```bash
-docker compose exec -T postgres psql -U voproshalych -d voproshalych < voproshalych_db_YYYYMMDD.sql
-```
+Экспорт можно делать **без остановки сервисов** — PostgreSQL MVCC гарантирует согласованность дампа.
