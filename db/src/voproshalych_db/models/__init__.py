@@ -8,8 +8,6 @@
 - Session: Сессии пользователей
 - Message: Сообщения в чате
 - QuestionAnswer: Пары вопрос-ответ
-- Chunk: Чанки базы знаний
-- Embedding: Векторные представления чанков
 - Subscription: История подписок на рассылку
 - Holiday: Праздники для рассылки
 - TelemetryLog: Логи телеметрии
@@ -36,10 +34,7 @@ from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from voproshalych_db.models.base import Base
-
-
-class User(Base):
+from voproshalych_db.models.base import Baseclass User(Base):
     """Модель пользователя платформы.
 
     Представляет пользователя одной из платформ (Telegram, VK, MAX).
@@ -149,63 +144,6 @@ class QuestionAnswer(Base):
     question_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
     answer_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class Chunk(Base):
-    """Модель чанка базы знаний.
-
-    Представляет фрагмент документа из базы знаний ТюмГУ.
-    Используется для семантического поиска.
-
-    Атрибуты:
-        id: UUID идентификатор чанка
-        text: Текстовое содержание чанка
-        source_url: URL источника документа
-        source_type: Тип источника (web, pdf, confluence)
-        title: Название документа
-        created_at: Дата создания
-        updated_at: Дата последнего обновления
-    """
-
-    __tablename__ = "chunks"
-
-    id = Column(
-        UUID(as_uuid=True), primary_key=True, default=lambda: __import__("uuid").uuid4()
-    )
-    text = Column(Text, nullable=False)
-    source_url = Column(String(500), nullable=True)
-    source_type = Column(String(50), nullable=True)
-    title = Column(String(255), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
-class Embedding(Base):
-    """Модель векторного представления чанка.
-
-    Хранит эмбеддинг (вектор) для семантического поиска.
-    Связан с чанком через внешний ключ.
-
-    Атрибуты:
-        id: Уникальный идентификатор
-        chunk_id: Ссылка на чанк
-        embedding: Вектор (хранится как текст/JSON)
-        created_at: Дата создания
-    """
-
-    __tablename__ = "embeddings"
-
-    id = Column(Integer, primary_key=True, index=True)
-    chunk_id = Column(
-        UUID(as_uuid=True), ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False
-    )
-    # vector(1024) - будет создано через миграцию alembic
-    embedding = Column(Text, nullable=False)  # храним как JSON/массив для совместимости
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    chunk = relationship("Chunk", backref="embeddings")
 
 
 class Subscription(Base):
