@@ -344,7 +344,7 @@ def create_lightrag_config() -> dict:
         "embedding_dimension": 1024,
         "model_name": os.getenv("LIGHT_RAG_MODEL_NAME", "deepvk-user-bge-m3"),
         "use_pg_graph": os.getenv("LIGHT_RAG_USE_PG_GRAPH", "true").lower() == "true",
-        "chunk_token_size": int(os.getenv("CHUNK_TOKEN_SIZE", "1024")),
-        "chunk_overlap_token_size": int(os.getenv("CHUNK_OVERLAP_TOKEN_SIZE", "200")),
+        "chunk_token_size": int(os.getenv("CHUNK_TOKEN_SIZE", "500")),
+        "chunk_overlap_token_size": int(os.getenv("CHUNK_OVERLAP_TOKEN_SIZE", "50")),
         "tokenizer": get_lightrag_tokenizer(),
     }
