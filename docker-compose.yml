@@ -50,6 +50,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
       HF_TOKEN: ${HF_TOKEN:-}
+      LIGHT_RAG_LLM_MODEL: ""
     ports:
       - "8004:8004"
     depends_on:

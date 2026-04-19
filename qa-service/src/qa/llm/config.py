@@ -78,8 +78,8 @@ class LLMConfig(BaseSettings):
     mistral_timeout: int = Field(default=600)
     gigachat_timeout: int = Field(default=120)
 
-    keyword_extraction_timeout: int = Field(default=30)
-    query_expansion_timeout: int = Field(default=30)
+    keyword_extraction_timeout: int = Field(default=120)
+    query_expansion_timeout: int = Field(default=60)
     answer_generation_timeout: int = Field(default=600)
     graph_building_timeout: int = Field(default=600)
 
