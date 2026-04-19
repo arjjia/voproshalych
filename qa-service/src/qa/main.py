@@ -48,6 +48,7 @@ async def init_lightrag():
             llm_model_func,
             _embedding_func,
             create_lightrag_config,
+            sentence_aware_chunking,
         )
 
         config = create_lightrag_config()
@@ -82,9 +83,11 @@ async def init_lightrag():
             doc_status_storage="PGDocStatusStorage" if storage_type == "PostgreSQL" else None,
             chunk_token_size=chunk_token_size,
             chunk_overlap_token_size=chunk_overlap_token_size,
+            chunking_func=sentence_aware_chunking,
             tokenizer=tokenizer,
             llm_model_max_async=1,
             embedding_func_max_async=1,
+            addon_params={"language": "Russian"},
         )
 
         if storage_type == "PostgreSQL":

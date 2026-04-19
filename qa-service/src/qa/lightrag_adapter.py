@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 from typing import Any, List
 
 import numpy as np
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 _tokenizer = None
 
+_SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+(?=[А-ЯЁA-Z])')
+
 
 class HuggingFaceTokenizer:
     """Токенизатор на основе HuggingFace для LightRAG.
@@ -23,11 +26,6 @@ class HuggingFaceTokenizer:
     """
 
     def __init__(self, model_name: str = "deepvk/USER-bge-m3"):
-        """Инициализировать токенизатор.
-
-        Args:
-            model_name: Название модели HuggingFace
-        """
         from transformers import AutoTokenizer
 
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -35,40 +33,104 @@ class HuggingFaceTokenizer:
         logger.info(f"HuggingFaceTokenizer initialized with {model_name}")
 
     def encode(self, content: str) -> List[int]:
-        """Закодировать текст в токены.
-
-        Args:
-            content: Текст для токенизации
-
-        Returns:
-            Список токенов
-        """
         return self._tokenizer.encode(content, add_special_tokens=True)
 
     def decode(self, tokens: List[int]) -> str:
-        """Декодировать токены в текст.
-
-        Args:
-            tokens: Список токенов
-
-        Returns:
-            Текст
-        """
         return self._tokenizer.decode(tokens, skip_special_tokens=True)
 
 
 def get_lightrag_tokenizer() -> HuggingFaceTokenizer:
-    """Получить токенизатор для LightRAG.
-
-    Использует SentencePiece токенизатор от deepvk/USER-bge-m3.
-
-    Returns:
-        Экземпляр HuggingFaceTokenizer
-    """
     global _tokenizer
     if _tokenizer is None:
         _tokenizer = HuggingFaceTokenizer("deepvk/USER-bge-m3")
     return _tokenizer
+
+
+def sentence_aware_chunking(
+    tokenizer,
+    content: str,
+    split_by_character: str | None = None,
+    split_by_character_only: bool = False,
+    chunk_overlap_token_size: int = 50,
+    chunk_token_size: int = 500,
+) -> list[dict[str, Any]]:
+    """Чанкинг с сохранением целостности предложений.
+
+    Разбивает текст на предложения, группирует в чанки до chunk_token_size
+    токенов. Границы чанков всегда совпадают с границами предложений.
+    Overlap реализуется целыми предложениями из конца предыдущего чанка.
+
+    Args:
+        tokenizer: Токенизатор с методом encode()
+        content: Текст для разбиения
+        split_by_character: Не используется (совместимость с LightRAG)
+        split_by_character_only: Не используется
+        chunk_overlap_token_size: Целевое количество токенов перекрытия
+        chunk_token_size: Максимальное количество токенов на чанк
+
+    Returns:
+        Список словарей с ключами tokens, content, chunk_order_index
+    """
+    if not content or not content.strip():
+        return []
+
+    paragraphs = re.split(r'\n\s*\n', content)
+    sentences = []
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        parts = _SENTENCE_SPLIT_RE.split(para)
+        for part in parts:
+            part = part.strip()
+            if part:
+                sentences.append(part)
+
+    if not sentences:
+        return []
+
+    chunks: list[dict[str, Any]] = []
+    current_sentences: list[str] = []
+    current_tokens = 0
+    overlap_sentences: list[str] = []
+    overlap_tokens = 0
+
+    for sent in sentences:
+        sent_tokens = len(tokenizer.encode(sent))
+
+        if current_tokens + sent_tokens > chunk_token_size and current_sentences:
+            chunk_text = " ".join(current_sentences)
+            chunks.append({
+                "tokens": current_tokens,
+                "content": chunk_text.strip(),
+                "chunk_order_index": len(chunks),
+            })
+
+            overlap_sentences = []
+            overlap_tokens = 0
+            for s in reversed(current_sentences):
+                s_tok = len(tokenizer.encode(s))
+                if overlap_tokens + s_tok <= chunk_overlap_token_size or not overlap_sentences:
+                    overlap_sentences.insert(0, s)
+                    overlap_tokens += s_tok
+                else:
+                    break
+
+            current_sentences = list(overlap_sentences)
+            current_tokens = overlap_tokens
+
+        current_sentences.append(sent)
+        current_tokens += sent_tokens
+
+    if current_sentences:
+        chunk_text = " ".join(current_sentences)
+        chunks.append({
+            "tokens": current_tokens,
+            "content": chunk_text.strip(),
+            "chunk_order_index": len(chunks),
+        })
+
+    return chunks
 
 
 _llm_call_count = 0
@@ -149,53 +211,36 @@ async def llm_model_func(
             from qa.llm.providers.ollama import OllamaProvider
 
             provider = OllamaProvider()
-            if provider.is_available():
-                logger.info(
-                    f"Using LightRAG model: Ollama/{provider._model}"
-                )
-                try:
-                    response = await asyncio.wait_for(
-                        provider.generate(
-                            prompt=full_prompt,
-                            temperature=config.default_temperature,
-                            max_tokens=config.default_max_tokens,
-                        ),
-                        timeout=timeout,
-                    )
-                    if response.content:
-                        return response.content
-                except asyncio.TimeoutError:
-                    logger.warning(f"Ollama timeout after {timeout}s")
-                    raise
-                except Exception as e:
-                    logger.warning(f"Ollama failed: {e}")
+            logger.info(f"Using LightRAG model: Ollama/{provider._model}")
+            response = await asyncio.wait_for(
+                provider.generate(
+                    prompt=full_prompt,
+                    temperature=config.default_temperature,
+                    max_tokens=config.default_max_tokens,
+                ),
+                timeout=timeout,
+            )
+            if response.content:
+                return response.content
+            raise ValueError("Ollama returned empty content")
+
         elif llm_model == "mistral":
             from qa.llm.providers.mistral import MistralProvider
 
             provider = MistralProvider()
-            if provider.is_available():
-                logger.info(
-                    f"Using LightRAG model: Mistral (timeout={timeout}s)"
-                )
-                try:
-                    response = await asyncio.wait_for(
-                        provider.generate(
-                            prompt=full_prompt,
-                            temperature=config.default_temperature,
-                            max_tokens=config.default_max_tokens,
-                        ),
-                        timeout=timeout,
-                    )
-                    if response.content:
-                        return response.content
-                except asyncio.TimeoutError:
-                    logger.warning(f"Mistral timeout after {timeout}s")
-                    raise
-                except Exception as e:
-                    if "429" in str(e):
-                        logger.warning("Mistral rate limited, trying OpenRouter fallback")
-                    else:
-                        logger.warning(f"Mistral failed: {e}")
+            logger.info(f"Using LightRAG model: Mistral (timeout={timeout}s)")
+            response = await asyncio.wait_for(
+                provider.generate(
+                    prompt=full_prompt,
+                    temperature=config.default_temperature,
+                    max_tokens=config.default_max_tokens,
+                ),
+                timeout=timeout,
+            )
+            if response.content:
+                return response.content
+            raise ValueError("Mistral returned empty content")
+
         else:
             from qa.llm.providers.openrouter import OpenRouterProvider
 
@@ -203,36 +248,21 @@ async def llm_model_func(
                 models=config.openrouter_models,
                 fallback_model="openrouter/free",
             )
-            if provider.is_available():
-                logger.info(
-                    f"Using LightRAG model: {llm_model or 'OpenRouter fallback'} (timeout={timeout}s)"
-                )
-                try:
-                    response = await asyncio.wait_for(
-                        provider.generate(
-                            prompt=full_prompt,
-                            temperature=config.default_temperature,
-                            max_tokens=config.default_max_tokens,
-                        ),
-                        timeout=timeout,
-                    )
-                    if response.content:
-                        return response.content
-                except asyncio.TimeoutError:
-                    logger.warning(f"OpenRouter timeout after {timeout}s")
-                    raise
-                except Exception as e:
-                    if "429" in str(e):
-                        logger.warning(f"OpenRouter rate limited: {e}")
+            logger.info(
+                f"Using LightRAG model: {llm_model or 'OpenRouter'} (timeout={timeout}s)"
+            )
+            response = await asyncio.wait_for(
+                provider.generate(
+                    prompt=full_prompt,
+                    temperature=config.default_temperature,
+                    max_tokens=config.default_max_tokens,
+                ),
+                timeout=timeout,
+            )
+            if response.content:
+                return response.content
+            raise ValueError("OpenRouter returned empty content")
 
-        logger.info("Falling back to LLM pool")
-        response = await asyncio.wait_for(
-            llm_pool.call(prompt=full_prompt),
-            timeout=timeout,
-        )
-        if response.content:
-            return response.content
-        raise ValueError("LLM returned empty content")
     except asyncio.TimeoutError:
         logger.error(f"LLM call timeout after {timeout}s for use_case={use_case}")
         if keyword_extraction:
