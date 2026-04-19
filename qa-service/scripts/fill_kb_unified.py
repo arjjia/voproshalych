@@ -3,29 +3,42 @@
 Единый пайплайн: парсит PDF → сразу отправляет в LightRAG → создаётся чанки + эмбеддинги + граф знаний.
 
 Аргументы:
-    --clear   Очистить LightRAG хранилище перед заполнением
-    --source  Индексировать только выбранный источник (confluence/sveden/utmn/confluence_study)
-    --limit   Ограничить количество документов для тестирования
+    --clear      Очистить LightRAG хранилище перед заполнением
+    --source     Индексировать только выбранный источник
+    --limit      Ограничить количество документов для тестирования
+    --no-graph   Отключить построение графа знаний
+    --url        Инкрементальное: индексировать конкретный URL (можно несколько раз)
+    --force      С --url: переиндексировать даже если документ уже в БД
 
-Пример использования:
-    # Очистить и заполнить с нуля (все источники)
+Примеры:
+    # Полная переиндексация
     python scripts/fill_kb_unified.py --clear
 
-    # Только Sveden
+    # Один источник
     python scripts/fill_kb_unified.py --clear --source sveden
 
-    # Тест с лимитом
-    python scripts/fill_kb_unified.py --limit 5
+    # Инкрементальное: добавить один PDF
+    python scripts/fill_kb_unified.py --url "https://sveden.utmn.ru/sveden/files/vie/Prikaz.pdf"
+
+    # Инкрементальное: добавить несколько документов
+    python scripts/fill_kb_unified.py \\
+        --url "https://sveden.utmn.ru/sveden/managers/" \\
+        --url "https://sveden.utmn.ru/sveden/files/vie/Prikaz.pdf"
+
+    # Переиндексировать конкретный документ (удалить старый + вставить новый)
+    python scripts/fill_kb_unified.py --force --url "https://sveden.utmn.ru/sveden/managers/"
 """
 
 import argparse
 import asyncio
 import hashlib
+import json
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass, field
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit, urlunsplit
 
 from sqlalchemy import create_engine, text
 
@@ -40,7 +53,6 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_url(url: str) -> str:
-    """Нормализовать URL для дедупликации."""
     if not url:
         return ""
     try:
@@ -50,13 +62,13 @@ def normalize_url(url: str) -> str:
             host = host[4:]
         path = unquote(parsed.path or "/")
         path = f"/{path.strip('/')}" if path else "/"
-        return urlunsplit(("https", host, path, "", ""))
+        query = parsed.query
+        return urlunsplit(("https", host, path, query, ""))
     except Exception:
         return url.strip()
 
 
 def make_doc_key(source_type: str, file_url: str | None, page_url: str, title: str) -> str:
-    """Сформировать стабильный ключ документа."""
     base = normalize_url(file_url or page_url)
     if not base:
         base = f"{source_type}:{unquote(title)}"
@@ -66,8 +78,6 @@ def make_doc_key(source_type: str, file_url: str | None, page_url: str, title: s
 
 @dataclass
 class Config:
-    """Конфигурация источников."""
-
     sveden_url: str = "https://sveden.utmn.ru/sveden/document/"
 
     utmn_pages: list[str] = field(
@@ -101,8 +111,6 @@ class Config:
 
 @dataclass
 class Document:
-    """Модель документа."""
-
     url: str
     title: str
     text_content: str
@@ -111,7 +119,6 @@ class Document:
 
 
 def get_engine():
-    """Получить движок БД."""
     import socket
 
     try:
@@ -134,7 +141,6 @@ def get_engine():
 
 
 def clear_lightrag_storage():
-    """Очистить LightRAG хранилище (все таблицы)."""
     engine = get_engine()
 
     with engine.connect() as conn:
@@ -151,13 +157,28 @@ def clear_lightrag_storage():
                 logger.info(f"Cleared: {table}")
             except Exception as e:
                 logger.warning(f"Could not clear {table}: {e}")
+
+        graph_result = conn.execute(text(
+            "SELECT graph_name FROM ag_catalog.ag_graph"
+        ))
+        graphs = [row[0] for row in graph_result]
+
+        for graph_name in graphs:
+            try:
+                conn.execute(text(f"SET search_path = ag_catalog, \"$user\", public"))
+                conn.execute(text(
+                    f"SELECT drop_graph('{graph_name}', true)"
+                ))
+                logger.info(f"Dropped AGE graph: {graph_name}")
+            except Exception as e:
+                logger.warning(f"Could not drop AGE graph {graph_name}: {e}")
+
         conn.commit()
 
-    logger.info(f"LightRAG storage cleared ({len(tables)} tables)")
+    logger.info(f"LightRAG storage cleared ({len(tables)} tables, {len(graphs)} AGE graphs)")
 
 
 async def init_lightrag():
-    """Инициализировать LightRAG."""
     from qa.main import init_lightrag as init_lr, is_lightrag_ready
 
     if not is_lightrag_ready():
@@ -169,7 +190,6 @@ async def init_lightrag():
 
 
 async def insert_document_to_lightrag(rag, doc: Document, doc_idx: int, no_graph: bool = False) -> bool:
-    """Вставить документ в LightRAG."""
     try:
         content = f"{doc.title}\n\n{doc.text_content}"
         doc_key = make_doc_key(doc.source_type, doc.file_url, doc.url, doc.title)
@@ -189,13 +209,217 @@ async def insert_document_to_lightrag(rag, doc: Document, doc_idx: int, no_graph
         return False
 
 
+def _extract_title_from_url(url: str) -> str:
+    filename = url.rstrip("/").split("/")[-1]
+    filename = re.sub(r"\?.*$", "", filename)
+    filename = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
+    filename = unquote(filename)
+    filename = filename.replace("-", " ").replace("_", " ")
+    return filename if filename else "Untitled"
+
+
+# ---------------------------------------------------------------------------
+# URL routing for incremental indexing
+# ---------------------------------------------------------------------------
+
+_ROUTE_CONFLUENCE_HELP_HTML = "confluence_help_html"
+_ROUTE_CONFLUENCE_HELP_PDF = "confluence_help_pdf"
+_ROUTE_SVEDEN_HTML = "sveden_html"
+_ROUTE_SVEDEN_PDF = "sveden_pdf"
+_ROUTE_UTMN_PDF = "utmn_pdf"
+_ROUTE_GENERIC_PDF = "generic_pdf"
+
+
+def route_url(url: str) -> tuple[str, str]:
+    """Определить source_type и doc_type по URL.
+
+    Returns:
+        (source_type, doc_type) where doc_type is one of:
+        - _ROUTE_CONFLUENCE_HELP_HTML  — Confluence REST API → HTML
+        - _ROUTE_CONFLUENCE_HELP_PDF   — PDF через OCR
+        - _ROUTE_SVEDEN_HTML           — HTML с таблицами
+        - _ROUTE_SVEDEN_PDF            — PDF через OCR
+        - _ROUTE_UTMN_PDF              — PDF через OCR
+        - _ROUTE_GENERIC_PDF           — PDF через OCR (fallback)
+    """
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower().replace("www.", "")
+    path_lower = (parsed.path or "").lower()
+    query = parsed.query or ""
+
+    is_pdf = ".pdf" in path_lower or ".pdf" in url.lower()
+
+    if "confluence.utmn.ru" in host:
+        if "pageid=" in query.lower():
+            return "confluence_help", _ROUTE_CONFLUENCE_HELP_HTML
+        if is_pdf:
+            return "confluence_help", _ROUTE_CONFLUENCE_HELP_PDF
+        return "confluence_help", _ROUTE_CONFLUENCE_HELP_HTML
+
+    if "sveden.utmn.ru" in host:
+        if is_pdf:
+            return "sveden", _ROUTE_SVEDEN_PDF
+        from qa.kb.parsers.sveden import SVEDEN_HTML_PAGES
+        sveden_html_urls = {p["url"].rstrip("/") for p in SVEDEN_HTML_PAGES}
+        if url.rstrip("/") in sveden_html_urls:
+            return "sveden", _ROUTE_SVEDEN_HTML
+        return "sveden", _ROUTE_SVEDEN_HTML
+
+    if "utmn.ru" in host and is_pdf:
+        return "utmn", _ROUTE_UTMN_PDF
+
+    if is_pdf:
+        return "utmn", _ROUTE_GENERIC_PDF
+
+    raise ValueError(
+        f"Не удалось определить тип документа для URL: {url}\n"
+        f"Поддерживаемые форматы:\n"
+        f"  - Confluence HTML: .../pages/viewpage.action?pageId=XXX\n"
+        f"  - Confluence PDF:  .../download/attachments/.../*.pdf\n"
+        f"  - Sveden HTML:     .../sveden/managers/ | /catering/ | /struct\n"
+        f"  - Sveden PDF:      .../sveden/files/.../*.pdf\n"
+        f"  - UTMN PDF:        .../utmn.ru/.../*.pdf\n"
+        f"  - Любой PDF:       *.pdf"
+    )
+
+
+async def process_single_url(url: str) -> Document | None:
+    """Парсинг одного URL. Возвращает Document или None."""
+    source_type, doc_type = route_url(url)
+
+    if doc_type == _ROUTE_CONFLUENCE_HELP_HTML:
+        parser = ConfluenceHelpParser()
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        page_id = params.get("pageId", [None])[0]
+        if not page_id:
+            logger.error(f"Не найден pageId в URL: {url}")
+            return None
+
+        import httpx
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            api_url = f"{parser._host}/rest/api/content/{page_id}?expand=body.export_view,title"
+            resp = await client.get(api_url, headers=parser._headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        title = data.get("title", f"Confluence page {page_id}")
+        html_body = data.get("body", {}).get("export_view", {}).get("value", "")
+        if not html_body:
+            logger.error(f"Пустой HTML контент: {url}")
+            return None
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_body, "html.parser")
+        text = soup.get_text(separator=" ")
+        text = re.sub(r"\s+", " ", text).strip()
+
+        return Document(
+            url=url,
+            title=title,
+            text_content=text,
+            source_type=source_type,
+            file_url=None,
+        )
+
+    if doc_type in (_ROUTE_CONFLUENCE_HELP_PDF, _ROUTE_SVEDEN_PDF, _ROUTE_UTMN_PDF, _ROUTE_GENERIC_PDF):
+        title = _extract_title_from_url(url)
+        logger.info(f"OCR парсинг PDF: {title}")
+
+        parser = SvedenParser()
+        doc = await parser._parse_pdf(url)
+        if not doc:
+            return None
+
+        return Document(
+            url=url,
+            title=doc.title if doc.title else title,
+            text_content=doc.text_content,
+            source_type=source_type,
+            file_url=url,
+        )
+
+    if doc_type == _ROUTE_SVEDEN_HTML:
+        parser = SvedenParser()
+        from qa.kb.parsers.sveden import SVEDEN_HTML_PAGES
+        title = "Sveden page"
+        for p in SVEDEN_HTML_PAGES:
+            if p["url"].rstrip("/") == url.rstrip("/"):
+                title = p["title"]
+                break
+
+        doc = await parser._parse_html_page(url, title)
+        if not doc or not doc.text_content.strip():
+            return None
+
+        return Document(
+            url=url,
+            title=doc.title,
+            text_content=doc.text_content,
+            source_type=source_type,
+            file_url=None,
+        )
+
+    logger.error(f"Неизвестный doc_type: {doc_type}")
+    return None
+
+
+def doc_exists_in_db(url: str, source_type: str, file_url: str | None, title: str) -> bool:
+    """Проверить, есть ли документ уже в LIGHTRAG_DOC_STATUS."""
+    engine = get_engine()
+    doc_key = make_doc_key(source_type, file_url, url, title)
+    doc_id = hashlib.sha1(doc_key.encode("utf-8")).hexdigest()[:16]
+
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT id FROM lightrag_doc_status WHERE id = :id LIMIT 1"),
+            {"id": doc_id},
+        )
+        return result.fetchone() is not None
+
+
+def force_delete_doc(url: str, source_type: str, file_url: str | None, title: str) -> None:
+    """Удалить документ и все его чанки из всех таблиц LightRAG."""
+    engine = get_engine()
+    doc_key = make_doc_key(source_type, file_url, url, title)
+    doc_id = hashlib.sha1(doc_key.encode("utf-8")).hexdigest()[:16]
+
+    with engine.connect() as conn:
+        chunk_rows = conn.execute(
+            text("SELECT id FROM lightrag_doc_chunks WHERE full_doc_id = :doc_id"),
+            {"doc_id": doc_id},
+        ).fetchall()
+
+        chunk_ids = [row[0] for row in chunk_rows]
+        logger.info(f"force_delete: doc_id={doc_id}, chunks={len(chunk_ids)}")
+
+        vdb_tables = conn.execute(text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name LIKE 'LIGHTRAG_VDB_CHUNKS%'"
+        )).fetchall()
+
+        for (vdb_table,) in vdb_tables:
+            conn.execute(text(f"DELETE FROM {vdb_table} WHERE full_doc_id = :doc_id"), {"doc_id": doc_id})
+            logger.info(f"force_delete: removed chunks from {vdb_table}")
+
+        conn.execute(text("DELETE FROM lightrag_doc_chunks WHERE full_doc_id = :doc_id"), {"doc_id": doc_id})
+        conn.execute(text("DELETE FROM lightrag_doc_full WHERE id = :doc_id"), {"doc_id": doc_id})
+        conn.execute(text("DELETE FROM lightrag_doc_status WHERE id = :doc_id"), {"doc_id": doc_id})
+        conn.execute(text("DELETE FROM lightrag_full_entities WHERE id = :doc_id"), {"doc_id": doc_id})
+        conn.execute(text("DELETE FROM lightrag_full_relations WHERE id = :doc_id"), {"doc_id": doc_id})
+
+        conn.commit()
+
+    logger.info(f"force_delete: документ {doc_id} удалён из всех таблиц")
+
+
+# ---------------------------------------------------------------------------
+# Source iterators (bulk mode)
+# ---------------------------------------------------------------------------
+
 async def iterate_confluence_help(limit: int | None = None):
-    """Итератор для Confluence Help (пространство help)."""
     parser = ConfluenceHelpParser()
     count = 0
-
-    for page_id, meta in parser.__class__.__mro__[0].__dict__.get("HELP_PAGES", {}).items() if False else []:
-        pass
 
     from qa.kb.parsers.confluence_help import HELP_PAGES, HELP_PDF_URLS
 
@@ -249,19 +473,35 @@ async def iterate_confluence_help(limit: int | None = None):
 
 
 async def iterate_sveden(config: Config, limit: int | None = None):
-    """Итератор для Sveden (только whitelist PDF)."""
-    parser = SvedenParser()
-    logger.info(f"Поиск PDF ссылок: {config.sveden_url}")
+    from qa.kb.parsers.sveden import SVEDEN_HTML_PAGES
 
+    parser = SvedenParser()
+    count = 0
+
+    for page_meta in SVEDEN_HTML_PAGES:
+        if limit and count >= limit:
+            return
+        logger.info(f"Sveden HTML: {page_meta['title']}")
+        doc = await parser._parse_html_page(page_meta["url"], page_meta["title"])
+        if doc and doc.text_content.strip():
+            yield Document(
+                url=page_meta["url"],
+                title=doc.title,
+                text_content=doc.text_content,
+                source_type="sveden",
+                file_url=None,
+            )
+            count += 1
+
+    logger.info(f"Поиск PDF ссылок: {config.sveden_url}")
     pdf_urls = await parser._find_pdf_links(config.sveden_url)
     logger.info(f"Sveden: найдено {len(pdf_urls)} PDF из whitelist")
 
-    count = 0
     for pdf_url in pdf_urls:
         if limit and count >= limit:
             return
 
-        logger.info(f"[{count + 1}/{len(pdf_urls)}] Парсинг PDF: {pdf_url}")
+        logger.info(f"[{count + 1}] Парсинг PDF: {pdf_url}")
 
         doc = await parser._parse_pdf(pdf_url)
         if doc:
@@ -276,7 +516,6 @@ async def iterate_sveden(config: Config, limit: int | None = None):
 
 
 async def iterate_utmn(config: Config, limit: int | None = None):
-    """Итератор для Utmn."""
     parser = UtmnParser()
     count = 0
 
@@ -303,7 +542,6 @@ async def iterate_utmn(config: Config, limit: int | None = None):
 
 
 async def iterate_confluence_study(limit: int | None = None):
-    """Итератор для Confluence Study."""
     parser = ConfluenceStudyParser()
 
     url = f"{parser._host}/rest/api/search"
@@ -368,7 +606,72 @@ async def iterate_confluence_study(limit: int | None = None):
             count += 1
 
 
-async def main(clear: bool, source_filter: str, limit: int | None, no_graph: bool):
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+async def run_incremental(urls: list[str], no_graph: bool, force: bool):
+    """Инкрементальное индексирование конкретных URL."""
+    logger.info("=" * 50)
+    logger.info(f"Инкрементальное индексирование ({len(urls)} URL)")
+    if force:
+        logger.info("--force: документы будут переиндексированы")
+    logger.info("=" * 50)
+
+    await init_lightrag()
+
+    from qa.main import get_lightrag
+    rag = get_lightrag()
+
+    if no_graph:
+        async def _dummy_llm_func(prompt, **kwargs):
+            return "[]"
+        rag.llm_model_func = _dummy_llm_func
+        logger.info("Graph building DISABLED (--no-graph)")
+
+    total = 0
+    indexed = 0
+    skipped = 0
+
+    for i, url in enumerate(urls, 1):
+        logger.info(f"\n[{i}/{len(urls)}] {url}")
+
+        try:
+            source_type, doc_type = route_url(url)
+        except ValueError as e:
+            logger.error(str(e))
+            continue
+
+        if force:
+            title_for_delete = _extract_title_from_url(url)
+            file_url_for_delete = url if "pdf" in url.lower() else None
+            force_delete_doc(url, source_type, file_url_for_delete, title_for_delete)
+            logger.info("Старые данные удалены, переиндексация...")
+
+        doc = await process_single_url(url)
+        if not doc:
+            logger.warning(f"Не удалось распарсить: {url}")
+            continue
+
+        if not force and doc_exists_in_db(doc.url, doc.source_type, doc.file_url, doc.title):
+            logger.info(f"SKIP (уже в БД): {doc.title}")
+            skipped += 1
+            continue
+
+        success = await insert_document_to_lightrag(rag, doc, i, no_graph)
+        if success:
+            indexed += 1
+        total += 1
+
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info(f"Инкрементальное индексирование завершено")
+    logger.info(f"Всего URL: {len(urls)}, обработано: {total}, проиндексировано: {indexed}, пропущено: {skipped}")
+    logger.info("=" * 50)
+
+
+async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph: bool):
+    """Массовое индексирование по источникам."""
     logger.info("=" * 50)
     logger.info("Заполнение Базы Знаний (LightRAG Unified)")
     logger.info("=" * 50)
@@ -436,7 +739,18 @@ async def main(clear: bool, source_filter: str, limit: int | None, no_graph: boo
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Заполнение Базы Знаний через LightRAG")
+    parser = argparse.ArgumentParser(
+        description="Заполнение Базы Знаний через LightRAG",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Примеры:\n"
+            "  %(prog)s --clear\n"
+            "  %(prog)s --clear --source sveden\n"
+            '  %(prog)s --url "https://sveden.utmn.ru/sveden/managers/"\n'
+            '  %(prog)s --force --url "https://sveden.utmn.ru/sveden/managers/"\n'
+            '  %(prog)s --no-graph --url "https://.../file.pdf"\n'
+        ),
+    )
     parser.add_argument(
         "--clear",
         action="store_true",
@@ -459,6 +773,20 @@ if __name__ == "__main__":
         action="store_true",
         help="Отключить построение графа знаний (только чанки + эмбеддинги)",
     )
+    parser.add_argument(
+        "--url",
+        action="append",
+        dest="urls",
+        help="URL документа/страницы для индексации (можно указать несколько раз)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Переиндексировать даже если документ уже в БД (только с --url)",
+    )
     args = parser.parse_args()
 
-    asyncio.run(main(args.clear, args.source, args.limit, args.no_graph))
+    if args.urls:
+        asyncio.run(run_incremental(args.urls, args.no_graph, args.force))
+    else:
+        asyncio.run(run_bulk(args.clear, args.source, args.limit, args.no_graph))

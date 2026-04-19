@@ -1,20 +1,20 @@
 """Парсер для портала Сведения об организации (sveden.utmn.ru).
 
-Получает страницу https://sveden.utmn.ru/sveden/document/,
-находит ссылки на PDF документы, скачивает и парсит их.
-
-Внимание: парсит только PDF из ALLOWED_SVEDEN_URLS whitelist.
+Парсит:
+- PDF документы через OCR (whitelist в ALLOWED_SVEDEN_URLS)
+- HTML-страницы с таблицами (руководство, питание, структура)
 """
 
 import logging
 import re
 from io import BytesIO
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 import pdfplumber
 import pytesseract
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from PIL import Image
 
 from .base import BaseParser, ParsedDocument
@@ -53,34 +53,49 @@ ALLOWED_SVEDEN_URLS = [
     "https://sveden.utmn.ru/sveden/files/ein/Poryadok_realizacii_dopolnitelynyx_professionalynyx_programm.pdf",
     "https://sveden.utmn.ru/sveden/files/aib/Poryadok_zacheta_uchebnyx_disciplin,_kursov,_modulei,_praktiti_pri_osvoenii_obuchayuschimisya_DPP.pdf",
     "https://sveden.utmn.ru/sveden/files/vix/Pologhenie_ob_itogovoi_attestacii.pdf",
+    "https://sveden.utmn.ru/sveden/files/vie/Prikaz_ot_27.02.2026_No_212-1.pdf",
+    "https://sveden.utmn.ru/sveden/files/eiz/Pologhenie_o_stipendialynom_obespechenii_FGAOU_VO_Tyumenskii_gosudarstvennyi_universitet_19.06.2023.pdf",
+    "https://sveden.utmn.ru/sveden/files/ziv/Pologhenie_o_merax_socialynoi_podderghki_detei-sirot_FGAOU_VO_TyumGU.pdf",
+    "https://sveden.utmn.ru/sveden/files/riz/Pologhenie_o_poryadke_predostavleniya_materialynoi_podderghki_obuchayuschimsya_TyumGU(1).pdf",
+    "https://sveden.utmn.ru/sveden/files/rim/Prikaz_ob_ustanovlenii_razmerov_materialynoi_podderghki_obuchayuschimsya_po_obrazovatelynym_programmam_SPO_i_VO_.pdf",
+    "https://sveden.utmn.ru/sveden/files/eio/Prikaz_ot_09.02.2026_No_121-1_Ob_ustanovlenii_razmerov_platy_za_proghivanie_obuchayusch,_Tyumeny.pdf",
+    "https://sveden.utmn.ru/sveden/files/zin/606_1.pdf",
+]
+
+SVEDEN_HTML_PAGES: list[dict[str, Any]] = [
+    {
+        "url": "https://sveden.utmn.ru/sveden/managers/",
+        "title": "Руководство ТюмГУ",
+    },
+    {
+        "url": "https://sveden.utmn.ru/sveden/catering/",
+        "title": "Организация питания в ТюмГУ",
+    },
+    {
+        "url": "https://sveden.utmn.ru/sveden/struct",
+        "title": "Структура и органы управления ТюмГУ",
+    },
 ]
 
 
 class SvedenParser(BaseParser):
     """Парсер для портала Сведения.
 
-    Получает страницу, находит ссылки на PDF, парсит каждый PDF.
+    Парсит PDF документы через OCR и HTML-страницы с таблицами.
     """
 
     def __init__(self) -> None:
-        """Инициализировать парсер."""
         self._base_url = "https://sveden.utmn.ru"
+        self._headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0)",
+        }
 
     def get_source_type(self) -> str:
-        """Вернуть тип источника."""
         return "sveden"
 
     async def get_documents(self, source_url: str) -> list[ParsedDocument]:
-        """Получить PDF документы со страницы Сведения.
-
-        Args:
-            source_url: URL страницы Сведения (обычно sveden.utmn.ru/sveden/document/)
-
-        Returns:
-            Список распарсенных PDF документов
-        """
         pdf_urls = await self._find_pdf_links(source_url)
-        logger.info(f"Найдено {len(pdf_urls)} PDF ссылок на {source_url}")
+        logger.info(f"Sveden: найдено {len(pdf_urls)} PDF из whitelist")
 
         documents = []
         for pdf_url in pdf_urls:
@@ -88,24 +103,36 @@ class SvedenParser(BaseParser):
             if doc:
                 documents.append(doc)
 
+        for page_meta in SVEDEN_HTML_PAGES:
+            doc = await self._parse_html_page(page_meta["url"], page_meta["title"])
+            if doc:
+                documents.append(doc)
+
+        return documents
+
+    async def get_html_documents(self) -> list[ParsedDocument]:
+        documents = []
+        for page_meta in SVEDEN_HTML_PAGES:
+            doc = await self._parse_html_page(page_meta["url"], page_meta["title"])
+            if doc:
+                documents.append(doc)
+        return documents
+
+    async def get_pdf_documents(self, source_url: str) -> list[ParsedDocument]:
+        pdf_urls = await self._find_pdf_links(source_url)
+        logger.info(f"Sveden: найдено {len(pdf_urls)} PDF из whitelist")
+
+        documents = []
+        for pdf_url in pdf_urls:
+            doc = await self._parse_pdf(pdf_url)
+            if doc:
+                documents.append(doc)
         return documents
 
     async def _find_pdf_links(self, url: str) -> list[str]:
-        """Найти все ссылки на PDF на странице.
-
-        Args:
-            url: URL страницы для поиска
-
-        Returns:
-            Список URL PDF файлов (только из whitelist)
-        """
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0)",
-        }
-
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(url, headers=headers)
+                response = await client.get(url, headers=self._headers)
                 response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -125,29 +152,13 @@ class SvedenParser(BaseParser):
             return []
 
     async def _parse_pdf(self, url: str) -> ParsedDocument | None:
-        """Скачать и распарсить PDF файл.
-
-        Всегда использует Tesseract OCR для извлечения текста из любого PDF.
-
-        Args:
-            url: URL PDF файла
-
-        Returns:
-            ParsedDocument с содержимым или None при ошибке
-        """
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0)",
-        }
-
         try:
             async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                response = await client.get(url, headers=headers)
+                response = await client.get(url, headers=self._headers)
                 response.raise_for_status()
 
             pdf_bytes = BytesIO(response.content)
-
             text_content = await self._extract_text_ocr(pdf_bytes)
-
             text_content = self._clean_text(text_content)
 
             if not text_content.strip():
@@ -168,15 +179,162 @@ class SvedenParser(BaseParser):
             logger.error(f"Ошибка парсинга PDF {url}: {e}")
             return None
 
+    async def _parse_html_page(self, url: str, title: str) -> ParsedDocument | None:
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(url, headers=self._headers)
+                response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            content_area = (
+                soup.find("div", class_="main-content")
+                or soup.find("div", class_="content")
+                or soup.find("main")
+                or soup.find("div", class_="container")
+                or soup.body
+            )
+            if not content_area:
+                content_area = soup
+
+            sections = []
+            for section_div in content_area.find_all("div", recursive=False):
+                section_heading = section_div.find(["h2", "h3", "h4"])
+                if not section_heading:
+                    continue
+
+                section_title = section_heading.get_text(strip=True)
+                tables = section_div.find_all("table")
+                if not tables:
+                    text = section_div.get_text(strip=True)
+                    if text and len(text) > 20:
+                        sections.append(f"{section_title}\n{text}")
+                    continue
+
+                tables_text = []
+                for table in tables:
+                    table_text = self._html_table_to_text(table)
+                    if table_text:
+                        tables_text.append(table_text)
+
+                if tables_text:
+                    combined = "\n\n".join(tables_text)
+                    sections.append(f"{section_title}\n\n{combined}")
+                else:
+                    text = section_div.get_text(strip=True)
+                    if text and len(text) > 20:
+                        sections.append(f"{section_title}\n{text}")
+
+            if not sections:
+                tables = content_area.find_all("table")
+                if tables:
+                    tables_text = []
+                    for table in tables:
+                        table_text = self._html_table_to_text(table)
+                        if table_text:
+                            tables_text.append(table_text)
+                    if tables_text:
+                        sections.append("\n\n".join(tables_text))
+
+                paragraphs = content_area.find_all("p")
+                p_texts = []
+                for p in paragraphs:
+                    text = p.get_text(strip=True)
+                    if text and len(text) > 20:
+                        p_texts.append(text)
+                if p_texts:
+                    sections.append("\n\n".join(p_texts))
+
+            full_text = "\n\n".join(sections)
+            full_text = re.sub(r"\n{3,}", "\n\n", full_text).strip()
+
+            if not full_text:
+                logger.warning(f"Пустой контент на HTML странице: {url}")
+                return None
+
+            logger.info(f"Распарсена HTML страница: {title}")
+            return ParsedDocument(
+                url=url,
+                title=title,
+                text_content=full_text,
+                source_type=self.get_source_type(),
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка парсинга HTML страницы {url}: {e}")
+            return None
+
+    def _html_table_to_text(self, table: Tag) -> str:
+        headers = []
+        thead = table.find("thead")
+        if thead:
+            header_row = thead.find("tr")
+            if header_row:
+                for th in header_row.find_all(["th", "td"]):
+                    header_text = th.get_text(separator=" ", strip=True)
+                    header_text = re.sub(r"\s+", " ", header_text)
+                    headers.append(header_text)
+        else:
+            first_row = table.find("tr")
+            if first_row:
+                cells = first_row.find_all(["th", "td"])
+                if cells and any(c.name == "th" for c in cells):
+                    for th in first_row.find_all("th"):
+                        header_text = th.get_text(separator=" ", strip=True)
+                        header_text = re.sub(r"\s+", " ", header_text)
+                        headers.append(header_text)
+
+        if not headers:
+            rows = table.find_all("tr")
+            if not rows:
+                return ""
+            row_texts = []
+            for row in rows:
+                cells = row.find_all(["td", "th"])
+                cell_texts = []
+                for cell in cells:
+                    cell_text = cell.get_text(separator=" ", strip=True)
+                    cell_text = re.sub(r"\s+", " ", cell_text)
+                    if cell_text:
+                        cell_texts.append(cell_text)
+                if cell_texts:
+                    row_texts.append(" | ".join(cell_texts))
+            return "\n".join(row_texts)
+
+        rows_text = []
+        tbody = table.find("tbody")
+        if tbody:
+            data_rows = tbody.find_all("tr")
+        else:
+            data_rows = table.find_all("tr")
+            if data_rows and any(c.name == "th" for c in data_rows[0].find_all(["th", "td"])):
+                data_rows = data_rows[1:]
+
+        for row in data_rows:
+            cells = row.find_all("td")
+            if not cells:
+                continue
+
+            row_parts = []
+            for i, cell in enumerate(cells):
+                cell_text = cell.get_text(separator=" ", strip=True)
+                cell_text = re.sub(r"\s+", " ", cell_text)
+                if not cell_text:
+                    continue
+                if i < len(headers):
+                    header = headers[i]
+                    if header in ("№", "#", "N"):
+                        continue
+                    row_parts.append(f"{header}: {cell_text}")
+                else:
+                    row_parts.append(cell_text)
+
+            if row_parts:
+                rows_text.append("; ".join(row_parts))
+
+        return "\n".join(rows_text)
+
     async def _extract_text_ocr(self, pdf_bytes: BytesIO) -> str:
-        """Извлечь текст из PDF с использованием OCR (Tesseract).
-
-        Args:
-            pdf_bytes: PDF файл в памяти
-
-        Returns:
-            Текст из PDF
-        """
         get_tesseract_version()
         ocr_config = get_ocr_config()
         pdf_bytes.seek(0)
@@ -200,18 +358,8 @@ class SvedenParser(BaseParser):
         return ""
 
     def _clean_text(self, text: str) -> str:
-        """Очистить текст от артефактов PDF.
-
-        Args:
-            text: Сырой текст из PDF
-
-        Returns:
-            Очищенный текст
-        """
         text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
-
         text = re.sub(r"([а-яёА-ЯЁa-zA-Z0-9])\s{2,}", r"\1 ", text)
-
         text = re.sub(r"\n{3,}", "\n\n", text)
 
         lines = []
@@ -223,14 +371,6 @@ class SvedenParser(BaseParser):
         return "\n".join(lines)
 
     def _extract_title_from_url(self, url: str) -> str:
-        """Извлечь название из URL PDF.
-
-        Args:
-            url: URL PDF файла
-
-        Returns:
-            Название документа
-        """
         filename = url.split("/")[-1]
         filename = re.sub(r"\?.*$", "", filename)
         filename = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
