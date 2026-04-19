@@ -105,7 +105,19 @@ class OllamaProvider(BaseLLMProvider):
     ) -> LLMResponse:
         payload = {
             "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "CRITICAL RULE: Extract entities and relationships "
+                        "ONLY from the text inside <Input Text> tags in the "
+                        "---Data to be Processed--- section. The ---Examples--- "
+                        "section is for reference ONLY. Do NOT extract any "
+                        "entities or relationships from the Examples section."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
             "stream": False,
             "think": False,
             "options": {
