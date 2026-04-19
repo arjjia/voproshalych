@@ -13,6 +13,49 @@ from qa.kb.embedding import get_embeddings_batch
 
 logger = logging.getLogger(__name__)
 
+
+def override_lightrag_prompts():
+    from lightrag.prompt import PROMPTS
+
+    PROMPTS["entity_extraction_examples"] = [
+        """<Entity_types>
+["Organization","Department","Person","Position","Document","Service","System","Event","Rule","Resource"]
+
+<Input Text>
+```
+Тюменский государственный университет (ТюмГУ) расположен в городе Тюмень. Университет включает Институт математики и компьютерных наук (ИМиКН), Институт биологии и Колледж информационных технологий. Ректор университета — Иванов Пётр Сергеевич. Студенты могут получить справку об обучении через Единый личный кабинет на сайте elk.utmn.ru.
+```
+
+<Output>
+entity{{tuple_delimiter}}Тюменский государственный университет{{tuple_delimiter}}Organization{{tuple_delimiter}}Тюменский государственный университет (ТюмГУ) — высшее учебное заведение в городе Тюмень.
+entity{{tuple_delimiter}}Институт математики и компьютерных наук{{tuple_delimiter}}Department{{tuple_delimiter}}ИМиКН — структурное подразделение ТюмГУ.
+entity{{tuple_delimiter}}Иванов Пётр Сергеевич{{tuple_delimiter}}Person{{tuple_delimiter}}Ректор Тюменского государственного университета.
+entity{{tuple_delimiter}}Единый личный кабинет{{tuple_delimiter}}System{{tuple_delimiter}}Информационная система ТюмГУ на сайте elk.utmn.ru.
+entity{{tuple_delimiter}}Справка об обучении{{tuple_delimiter}}Document{{tuple_delimiter}}Документ, получаемый через Единый личный кабинет.
+relation{{tuple_delimiter}}Тюменский государственный университет{{tuple_delimiter}}Институт математики и компьютерных наук{{tuple_delimiter}}structure{{tuple_delimiter}}ИМиКН является подразделением ТюмГУ.
+relation{{tuple_delimiter}}Тюменский государственный университет{{tuple_delimiter}}Иванов Пётр Сергеевич{{tuple_delimiter}}leadership{{tuple_delimiter}}Иванов П.С. — ректор ТюмГУ.
+relation{{tuple_delimiter}}Единый личный кабинет{{tuple_delimiter}}Справка об обучении{{tuple_delimiter}}service{{tuple_delimiter}}Через ЕЛК можно получить справку.
+{completion_delimiter}
+
+""",
+        """<Entity_types>
+["Organization","Department","Person","Position","Document","Service","System","Event","Rule","Resource"]
+
+<Input Text>
+```
+Для подключения к Wi-Fi университета используйте корпоративную учётную запись. Сертификат можно получить в кабинете 205 корпуса 1. Правила использования сети описаны в Положении об информационных системах от 15.03.2024.
+```
+
+<Output>
+entity{{tuple_delimiter}}Wi-Fi университета{{tuple_delimiter}}Resource{{tuple_delimiter}}Беспроводная сеть ТюмГУ.
+entity{{tuple_delimiter}}Корпоративная учётная запись{{tuple_delimiter}}System{{tuple_delimiter}}Учётная запись для авторизации в системах университета.
+entity{{tuple_delimiter}}Положение об информационных системах{{tuple_delimiter}}Document{{tuple_delimiter}}Документ от 15.03.2024 с правилами использования сети.
+relation{{tuple_delimiter}}Wi-Fi университета{{tuple_delimiter}}Корпоративная учётная запись{{tuple_delimiter}}access{{tuple_delimiter}}Для Wi-Fi нужна корпоративная учётная запись.
+{completion_delimiter}
+
+""",
+    ]
+
 _tokenizer = None
 
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+(?=[А-ЯЁA-Z])')

@@ -49,7 +49,10 @@ async def init_lightrag():
             _embedding_func,
             create_lightrag_config,
             sentence_aware_chunking,
+            override_lightrag_prompts,
         )
+
+        override_lightrag_prompts()
 
         config = create_lightrag_config()
 
