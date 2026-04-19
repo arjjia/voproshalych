@@ -40,7 +40,6 @@ fi
 psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" <<-EOSQL
     CREATE SCHEMA IF NOT EXISTS public;
     CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA public;
 EOSQL
 
 # Step 6: Update search_path (use single quotes to preserve $user)

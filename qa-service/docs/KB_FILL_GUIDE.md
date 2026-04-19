@@ -332,13 +332,12 @@ docker exec voproshalych_v2-qa-service-1 curl -s http://host.docker.internal:114
 - Запустите с `--clear --source <источник>` для полной переиндексации
 - Проверьте что страницы не были отфильтрованы (короткий контент < 50 символов)
 
-### gemma4:e4b-nvfp4 не скачивается
+### Ollama сервер недоступен
 
 ```bash
-# Обновите Ollama.app до последней версии
-# Откройте Ollama.app → меню → Check for updates
-# Или скачайте с https://ollama.com/download/mac
+# Проверить доступность удалённого Ollama
+curl -s http://iv-fc.orienteer.ru:12434/api/tags
 
-# После обновления
-ollama pull gemma4:e4b-nvfp4
+# Если не отвечает — проверить сетевую доступность сервера
+ping iv-fc.orienteer.ru
 ```

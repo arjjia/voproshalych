@@ -1,17 +1,15 @@
-# Тестирование и запуск QA-сервиса
+# Тестирование QA-сервиса
 
 ## Быстрые команды
 
 ### Запуск сервиса
 
 ```bash
-# Локально с переменными окружения
-MISTRAL_API_KEY=your_key \
-OPENROUTER_API_KEY=your_key \
-uv run uvicorn qa.main:app --host 0.0.0.0 --port 8004
-
 # Через Docker
 docker compose up -d qa-service
+
+# Локально с переменными окружения
+uv run uvicorn qa.main:app --host 0.0.0.0 --port 8004
 ```
 
 ### Проверка работоспособности
@@ -20,20 +18,10 @@ docker compose up -d qa-service
 # Health check
 curl http://localhost:8004/health
 
-# Тестовый запрос (LightRAG с fallback)
+# Тестовый запрос (LightRAG)
 curl -X POST http://localhost:8004/qa \
   -H "Content-Type: application/json" \
   -d '{"question": "Какие правила приёма в ТюмГУ?"}'
-
-# Только LightRAG
-curl -X POST http://localhost:8004/qa/lightrag \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Какие правила приёма?"}'
-
-# Только Classic RAG
-curl -X POST http://localhost:8004/qa/classic \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Какие правила приёма?"}'
 ```
 
 ### Запуск тестов
@@ -45,9 +33,6 @@ uv run pytest
 # Только unit-тесты
 uv run pytest tests/unit/
 
-# Только интеграционные тесты
-uv run pytest tests/integration/
-
 # С покрытием кода
 uv run pytest --cov=src --cov-report=html
 ```
@@ -55,65 +40,61 @@ uv run pytest --cov=src --cov-report=html
 ### Docker команды
 
 ```bash
-# Сборка образа
 docker compose build qa-service
-
-# Запуск с PostgreSQL
 docker compose up -d postgres qa-service
-
-# Логи
 docker compose logs qa-service
-
-# Остановка
 docker compose down
 ```
 
 ## Тестирование LightRAG
 
-### Проверка статуса LightRAG
+### Проверка статуса
 
 ```bash
-# Статус инициализации
 curl http://localhost:8004/health
 
-# Логи LightRAG
 docker compose logs qa-service | grep -i "lightrag"
 ```
 
-### Тестирование графа знаний
+### Проверка графа знаний
 
 ```bash
-# Проверить расширения PostgreSQL
+# Расширения PostgreSQL
 docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
   "SELECT * FROM pg_extension WHERE extname IN ('vector', 'age');"
 
-# Проверить таблицы графа
+# Таблицы LightRAG
 docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
   "\dt" | grep lightrag
+
+# Количество сущностей и связей
+docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
+  "SELECT 'entities' AS type, COUNT(*) FROM lightrag_full_entities
+   UNION ALL SELECT 'relations', COUNT(*) FROM lightrag_full_relations
+   UNION ALL SELECT 'chunks', COUNT(*) FROM lightrag_doc_chunks;"
 ```
 
-### Импорт и построение графа
+### Статистика БЗ
 
 ```bash
-# Импорт чанков в LightRAG (включает KG extraction)
-curl -X POST http://localhost:8004/kb/import-to-lightrag
-
-# Статус импорта
-curl http://localhost:8004/kb/index-status
-
-# История версий
-curl http://localhost:8004/kb/index-versions
+curl http://localhost:8004/kb/stats
 ```
 
-### Проверка fallback
+### Заполнение БЗ
 
 ```bash
-# Остановить LightRAG (симуляция)
-# Отправить запрос - должен fallback на classic RAG
-curl -X POST http://localhost:8004/qa \
-  -H "Content-Type: application/json" \
-  -d '{"question": "тест fallback"}'
+# Полная переиндексация
+docker compose exec qa-service uv run python scripts/fill_kb_unified.py --clear
+
+# Один источник
+docker compose exec qa-service uv run python scripts/fill_kb_unified.py --clear --source sveden
+
+# Инкрементально
+docker compose exec qa-service uv run python scripts/fill_kb_unified.py \
+  --url "https://sveden.utmn.ru/sveden/managers/"
 ```
+
+Подробнее: [KB_FILL_GUIDE.md](./KB_FILL_GUIDE.md)
 
 ## Структура тестов
 
@@ -127,15 +108,32 @@ curl -X POST http://localhost:8004/qa \
 - `tests/integration/test_qa_api.py` — тесты API
 - `tests/integration/test_lightrag.py` — тесты LightRAG
 
+## Конфигурация
+
+### Переменные окружения
+
+| Переменная | Описание | По умолчанию |
+|------------|----------|--------------|
+| `MISTRAL_API_KEY` | API ключ Mistral AI | - |
+| `OPENROUTER_API_KEY` | API ключ OpenRouter | - |
+| `GIGACHAT_CLIENT_ID` | Client ID GigaChat | - |
+| `GIGACHAT_CLIENT_SECRET` | Client Secret GigaChat | - |
+| `POSTGRES_HOST` | Хост PostgreSQL | `postgres` |
+| `POSTGRES_DB` | Имя БД | `voproshalych` |
+| `LIGHT_RAG_USE_PG_GRAPH` | Использовать PG для графа | `true` |
+| `LIGHT_RAG_LLM_MODEL` | LLM для индексации | `ollama` |
+| `OLLAMA_BASE_URL` | URL Ollama сервера | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Модель Ollama | `qwen3.6:35b` |
+| `CHUNK_TOKEN_SIZE` | Размер чанка (токены) | `500` |
+| `CHUNK_OVERLAP_TOKEN_SIZE` | Перекрытие чанков | `50` |
+
 ## Частые проблемы
 
 ### Ошибка "No available LLM providers"
 
-Проверьте переменные окружения:
-
 ```bash
-echo $MISTRAL_API_KEY
 echo $OPENROUTER_API_KEY
+echo $MISTRAL_API_KEY
 ```
 
 ### Ошибка подключения к PostgreSQL
@@ -148,43 +146,7 @@ docker compose logs postgres
 ### LightRAG не инициализируется
 
 ```bash
-# Проверить расширения
 docker compose exec -T postgres psql -U voproshalych -d voproshalych -c \
   "SELECT * FROM pg_extension WHERE extname = 'age';"
-
-# Проверить логи
 docker compose logs qa-service | grep -i error
 ```
-
-### Тесты падают с ошибкой импорта
-
-```bash
-uv sync
-```
-
-## Конфигурация
-
-### Переменные окружения
-
-| Переменная | Описание | По умолчанию |
-|------------|----------|--------------|
-| `MISTRAL_API_KEY` | API ключ Mistral AI | - |
-| `OPENROUTER_API_KEY` | API ключ OpenRouter | - |
-| `GIGACHAT_CLIENT_ID` | Client ID GigaChat | - |
-| `GIGACHAT_CLIENT_SECRET` | Client Secret GigaChat | - |
-| `MODEL_PRIORITY` | Порядок провайдеров | `openrouter,gigachat,mistral` |
-| `POSTGRES_HOST` | Хост PostgreSQL | `postgres` |
-| `POSTGRES_DB` | Имя БД | `voproshalych` |
-| `POSTGRES_USER` | Пользователь БД | `voproshalych` |
-| `POSTGRES_PASSWORD` | Пароль БД | `voproshalych` |
-| `USE_LIGHT_RAG` | Включить LightRAG | `true` |
-| `LIGHT_RAG_USE_PG_GRAPH` | Использовать PG для графа | `true` |
-| `LIGHT_RAG_MODEL_NAME` | Имя модели эмбеддингов | `deepvk-user-bge-m3` |
-
-### Таймауты
-
-| Параметр | Значение |
-|----------|----------|
-| LightRAG timeout | 20 сек |
-| Classic RAG timeout | 15 сек |
-| Max retries | 3 |
