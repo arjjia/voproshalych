@@ -1,4 +1,4 @@
-"""Ollama провайдер для локальных LLM моделей."""
+"""Ollama провайдер для LLM моделей через нативный API."""
 
 import asyncio
 import logging
@@ -13,9 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(BaseLLMProvider):
-    """Провайдер для Ollama (локальные модели).
+    """Провайдер для Ollama.
 
-    Использует OpenAI-совместимый API Ollama.
+    Использует нативный /api/chat endpoint для корректной работы
+    с моделями, имеющими thinking mode (qwen3.6 и др.).
+    Параметр think=False отключает reasoning и возвращает
+    контент напрямую в message.content.
     """
 
     def __init__(
@@ -23,12 +26,12 @@ class OllamaProvider(BaseLLMProvider):
         model: str | None = None,
         base_url: str | None = None,
     ):
-        self._model = model or os.getenv("OLLAMA_MODEL", "gemma4:e4b")
+        self._model = model or os.getenv("OLLAMA_MODEL", "qwen3.6:35b")
         self._base_url = (
             base_url
             or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         ).rstrip("/")
-        self._api_url = f"{self._base_url}/v1/chat/completions"
+        self._api_url = f"{self._base_url}/api/chat"
         self._session = requests.Session()
 
     @property
@@ -103,9 +106,12 @@ class OllamaProvider(BaseLLMProvider):
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
             "stream": False,
+            "think": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
         }
 
         logger.info(
@@ -120,15 +126,28 @@ class OllamaProvider(BaseLLMProvider):
                 data = await asyncio.to_thread(
                     self._sync_generate, payload, 300.0
                 )
-                content = data["choices"][0]["message"]["content"]
-                usage = data.get("usage", {})
+
+                content = data.get("message", {}).get("content") or ""
+
+                if not content.strip():
+                    logger.warning(
+                        f"Ollama returned empty content (attempt {attempt + 1}/3). "
+                        f"Response keys: {list(data.get('message', {}).keys())}"
+                    )
+                    last_error = ValueError("Ollama returned empty content")
+                    if attempt < 2:
+                        await asyncio.sleep(3.0 * (attempt + 1))
+                    continue
+
+                prompt_tokens = data.get("prompt_eval_count", 0)
+                eval_tokens = data.get("eval_count", 0)
                 return LLMResponse(
                     content=content,
                     model=self._model,
                     usage={
-                        "prompt_tokens": usage.get("prompt_tokens", 0),
-                        "completion_tokens": usage.get("completion_tokens", 0),
-                        "total_tokens": usage.get("total_tokens", 0),
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": eval_tokens,
+                        "total_tokens": prompt_tokens + eval_tokens,
                     },
                 )
             except requests.exceptions.HTTPError as e:

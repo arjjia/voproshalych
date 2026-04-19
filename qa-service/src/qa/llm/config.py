@@ -68,7 +68,7 @@ class LLMConfig(BaseSettings):
     model_priority: list[str] = Field(default=["openrouter", "gigachat", "mistral"])
     lightrag_llm_model: str = Field(default="")
     ollama_base_url: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="gemma4:e4b")
+    ollama_model: str = Field(default="qwen3.6:35b")
 
     default_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     default_max_tokens: int = Field(default=2048, ge=1)
