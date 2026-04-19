@@ -143,7 +143,11 @@ def get_engine():
 def clear_lightrag_storage():
     engine = get_engine()
 
+    graphs = []
+
     with engine.connect() as conn:
+        conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+
         result = conn.execute(text(
             "SELECT table_name FROM information_schema.tables "
             "WHERE table_schema = 'public' AND table_name LIKE 'lightrag_%' "
@@ -158,22 +162,23 @@ def clear_lightrag_storage():
             except Exception as e:
                 logger.warning(f"Could not clear {table}: {e}")
 
-        graph_result = conn.execute(text(
-            "SELECT graph_name FROM ag_catalog.ag_graph"
-        ))
-        graphs = [row[0] for row in graph_result]
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("LOAD 'age'"))
+            conn.execute(text('SET search_path = ag_catalog, "$user", public'))
+            graph_result = conn.execute(text("SELECT name FROM ag_graph"))
+            graphs = [row[0] for row in graph_result]
 
-        for graph_name in graphs:
-            try:
-                conn.execute(text(f"SET search_path = ag_catalog, \"$user\", public"))
-                conn.execute(text(
-                    f"SELECT drop_graph('{graph_name}', true)"
-                ))
-                logger.info(f"Dropped AGE graph: {graph_name}")
-            except Exception as e:
-                logger.warning(f"Could not drop AGE graph {graph_name}: {e}")
-
-        conn.commit()
+            for graph_name in graphs:
+                try:
+                    conn.execute(text(
+                        f"SELECT drop_graph('{graph_name}', true)"
+                    ))
+                    logger.info(f"Dropped AGE graph: {graph_name}")
+                except Exception as e:
+                    logger.warning(f"Could not drop AGE graph {graph_name}: {e}")
+        except Exception as e:
+            logger.warning(f"AGE not available: {e}")
 
     logger.info(f"LightRAG storage cleared ({len(tables)} tables, {len(graphs)} AGE graphs)")
 
@@ -676,6 +681,10 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
     logger.info("Заполнение Базы Знаний (LightRAG Unified)")
     logger.info("=" * 50)
 
+    if clear:
+        logger.info("Очистка LightRAG хранилища...")
+        clear_lightrag_storage()
+
     await init_lightrag()
 
     from qa.main import get_lightrag
@@ -686,10 +695,6 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
             return "[]"
         rag.llm_model_func = _dummy_llm_func
         logger.info("Graph building DISABLED (--no-graph)")
-
-    if clear:
-        logger.info("Очистка LightRAG хранилища...")
-        clear_lightrag_storage()
 
     config = Config()
 
