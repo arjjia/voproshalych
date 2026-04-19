@@ -23,12 +23,14 @@ class QAResponse(BaseModel):
         model: Использованная модель
         sources: Источники (если есть)
         expanded_query: Расширенный запрос (опционально)
+        keywords: Ключевые слова, извлечённые LightRAG (опционально)
     """
 
     answer: str
     model: str
     sources: list[str] = Field(default_factory=list)
     expanded_query: str | None = Field(default=None, max_length=5000)
+    keywords: dict | None = Field(default=None)
 
 
 class HolidayGreetingRequest(BaseModel):

@@ -1,6 +1,7 @@
 """Адаптеры для интеграции LightRAG с существующим LLM Pool и embedding моделью."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -12,6 +13,13 @@ from qa.llm import get_llm_pool, get_llm_config
 from qa.kb.embedding import get_embeddings_batch
 
 logger = logging.getLogger(__name__)
+
+_last_extracted_keywords: dict = {"high_level": [], "low_level": []}
+
+
+def get_last_extracted_keywords() -> dict:
+    """Получить ключевые слова, извлечённые при последнем вызове LightRAG."""
+    return _last_extracted_keywords.copy()
 
 
 def override_lightrag_prompts():
@@ -264,6 +272,7 @@ async def llm_model_func(
                 timeout=timeout,
             )
             if response.content:
+                _log_keywords_if_extraction(keyword_extraction, response.content)
                 return response.content
             raise ValueError("Ollama returned empty content")
 
@@ -281,6 +290,7 @@ async def llm_model_func(
                 timeout=timeout,
             )
             if response.content:
+                _log_keywords_if_extraction(keyword_extraction, response.content)
                 return response.content
             raise ValueError("Mistral returned empty content")
 
@@ -303,6 +313,7 @@ async def llm_model_func(
                 timeout=timeout,
             )
             if response.content:
+                _log_keywords_if_extraction(keyword_extraction, response.content)
                 return response.content
             raise ValueError("OpenRouter returned empty content")
 
@@ -329,6 +340,28 @@ async def _embedding_func(texts: list[str]) -> np.ndarray:
     """
     embeddings = get_embeddings_batch(texts)
     return np.array(embeddings)
+
+
+def _log_keywords_if_extraction(keyword_extraction: bool, content: str) -> None:
+    """Если это вызов keyword_extraction — распарсить и залогировать ключевые слова."""
+    global _last_extracted_keywords
+    if not keyword_extraction:
+        return
+    try:
+        match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+            hl = parsed.get("high_level_keywords", [])
+            ll = parsed.get("low_level_keywords", [])
+            _last_extracted_keywords = {"high_level": hl, "low_level": ll}
+            logger.info(
+                f"[PIPELINE] Keywords extracted: "
+                f"high_level={hl}, low_level={ll}"
+            )
+        else:
+            logger.warning(f"[PIPELINE] Keyword extraction: no JSON found in response")
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"[PIPELINE] Keyword extraction parse failed: {e}")
 
 
 def create_lightrag_config() -> dict:
