@@ -196,26 +196,29 @@ class BotService:
         """
 
         if user is None:
-            return self._ask_qa_service(question)
+            return self._ask_qa_service(question).get("answer", "")
 
         dialog_session = self._dialog_service.get_or_create_active_session(user.id)
         if dialog_session is None:
-            return self._ask_qa_service(question)
+            return self._ask_qa_service(question).get("answer", "")
 
         history = self._dialog_service.build_context(
             session_id=dialog_session.id,
             limit=settings.dialog_context_limit_messages,
         )
-        reply_text = self._ask_qa_service(
+        qa_result = self._ask_qa_service(
             question=question,
             context=history or None,
         )
         self._dialog_service.save_question_answer(
             session_id=dialog_session.id,
             question=question,
-            answer=reply_text,
+            answer=qa_result.get("answer", ""),
+            expanded_query=qa_result.get("expanded_query"),
+            keywords=qa_result.get("keywords"),
+            model_used=qa_result.get("model"),
         )
-        return reply_text
+        return qa_result.get("answer", "")
 
     def _handle_voice_message(self, message: IncomingMessage) -> BotResponse:
         """Обрабатывает голосовое сообщение.
@@ -263,16 +266,17 @@ class BotService:
             ]
         )
 
-    def _ask_qa_service(self, question: str, context: str | None = None) -> str:
-        """Отправляет вопрос в QA-сервис и возвращает ответ.
+    def _ask_qa_service(self, question: str, context: str | None = None) -> dict:
+        """Отправляет вопрос в QA-сервис и возвращает полный ответ.
 
         Args:
             question: Текст вопроса пользователя.
             context: История диалога или другой дополнительный контекст.
 
         Returns:
-            str: Ответ QA-сервиса или fallback-текст.
+            dict: Ответ с ключами answer, expanded_query, keywords, model.
         """
+        import json
         import logging
 
         from services.qa_service_client import (
@@ -288,28 +292,28 @@ class BotService:
             return self._qa_service_client.ask(question=question, context=context)
         except QAServiceTimeout:
             logger.error("QA service timeout")
-            return (
+            return {"answer": (
                 "Поиск ответа занимает дольше обычного. "
                 "Попробуйте переформулировать вопрос или повторить позже."
-            )
+            )}
         except QAServiceUnavailable:
             logger.error("QA service unavailable")
-            return (
+            return {"answer": (
                 "Сервис временно недоступен. "
                 "Мы уже работаем над устранением проблемы. Попробуйте через несколько минут."
-            )
+            )}
         except QAServiceRateLimited:
             logger.error("QA service rate limited")
-            return (
+            return {"answer": (
                 "Сервис сейчас перегружен запросами. "
                 "Попробуйте повторить вопрос чуть позже."
-            )
+            )}
         except QAServiceError as e:
             logger.error(f"QA service error: {e}")
-            return "Не удалось сформировать ответ. Попробуйте переформулировать вопрос."
+            return {"answer": "Не удалось сформировать ответ. Попробуйте переформулировать вопрос."}
         except Exception as e:
             logger.error(f"Unexpected QA error: {e}")
-            return "Что-то пошло не так. Попробуйте повторить запрос позже."
+            return {"answer": "Что-то пошло не так. Попробуйте повторить запрос позже."}
 
     def _is_service_command(self, normalized_text: str) -> bool:
         """Определяет, является ли сообщение сервисной slash-командой.

@@ -19,12 +19,19 @@ def test_ask_returns_answer_from_single_request() -> None:
     client._client.post.return_value = httpx.Response(
         200,
         request=httpx.Request("POST", "http://qa-service/qa"),
-        json={"answer": "Ответ"},
+        json={
+            "answer": "Ответ",
+            "expanded_query": "Расширенный запрос",
+            "keywords": {"high_level": ["тест"], "low_level": ["вопрос"]},
+            "model": "lightrag-mix",
+        },
     )
 
-    answer = client.ask("Вопрос", context="Контекст")
+    result = client.ask("Вопрос", context="Контекст")
 
-    assert answer == "Ответ"
+    assert result["answer"] == "Ответ"
+    assert result["expanded_query"] == "Расширенный запрос"
+    assert result["keywords"] == {"high_level": ["тест"], "low_level": ["вопрос"]}
     client._client.post.assert_called_once_with(
         "/qa",
         json={"question": "Вопрос", "context": "Контекст"},

@@ -15,7 +15,9 @@ def test_handle_dialog_message_passes_history_via_context() -> None:
         id=42
     )
     service._dialog_service.build_context.return_value = "Пользователь: Речь о поступлении"
-    service._ask_qa_service = MagicMock(return_value="Ответ")
+    service._ask_qa_service = MagicMock(
+        return_value={"answer": "Ответ", "expanded_query": None, "keywords": None, "model": ""}
+    )
 
     reply = service._handle_dialog_message(
         question="А что со сроками?",
@@ -31,6 +33,9 @@ def test_handle_dialog_message_passes_history_via_context() -> None:
         session_id=42,
         question="А что со сроками?",
         answer="Ответ",
+        expanded_query=None,
+        keywords=None,
+        model_used="",
     )
 
 
@@ -42,7 +47,9 @@ def test_handle_dialog_message_skips_empty_history_context() -> None:
         id=11
     )
     service._dialog_service.build_context.return_value = ""
-    service._ask_qa_service = MagicMock(return_value="Ответ")
+    service._ask_qa_service = MagicMock(
+        return_value={"answer": "Ответ", "expanded_query": None, "keywords": None, "model": ""}
+    )
 
     service._handle_dialog_message(
         question="Когда прием документов?",
@@ -63,9 +70,9 @@ def test_ask_qa_service_returns_overload_message_on_rate_limit() -> None:
         "QA service rate limited"
     )
 
-    reply = service._ask_qa_service("Когда начинается семестр?")
+    result = service._ask_qa_service("Когда начинается семестр?")
 
-    assert reply == (
+    assert result["answer"] == (
         "Сервис сейчас перегружен запросами. "
         "Попробуйте повторить вопрос чуть позже."
     )

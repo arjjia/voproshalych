@@ -34,7 +34,10 @@ from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from voproshalych_db.models.base import Baseclass User(Base):
+from voproshalych_db.models.base import Base
+
+
+class User(Base):
     """Модель пользователя платформы.
 
     Представляет пользователя одной из платформ (Telegram, VK, MAX).
@@ -143,6 +146,8 @@ class QuestionAnswer(Base):
     id = Column(Integer, primary_key=True, index=True)
     question_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
     answer_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
+    expanded_query = Column(Text, nullable=True)
+    keywords = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

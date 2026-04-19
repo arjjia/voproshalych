@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy.sql import func
 
 from db import DialogMessage, DialogSession, QuestionAnswerLink, get_session
@@ -125,6 +127,8 @@ class DialogService:
         question: str,
         answer: str,
         model_used: str | None = None,
+        expanded_query: str | None = None,
+        keywords: dict | None = None,
     ) -> tuple[DialogMessage | None, DialogMessage | None]:
         """Сохраняет пару вопрос-ответ в историю и связывает их между собой.
 
@@ -133,6 +137,8 @@ class DialogService:
             question: Текст вопроса пользователя.
             answer: Текст ответа бота.
             model_used: Идентификатор модели, если он известен.
+            expanded_query: Расширенный/исправленный запрос от LLM.
+            keywords: Извлечённые ключевые слова (high_level, low_level).
 
         Returns:
             tuple[DialogMessage | None, DialogMessage | None]:
@@ -156,10 +162,14 @@ class DialogService:
             session.add(answer_message)
             session.flush()
 
+            keywords_json = json.dumps(keywords, ensure_ascii=False) if keywords else None
+
             session.add(
                 QuestionAnswerLink(
                     question_id=question_message.id,
                     answer_id=answer_message.id,
+                    expanded_query=expanded_query,
+                    keywords=keywords_json,
                 )
             )
             (

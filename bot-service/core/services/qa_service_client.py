@@ -57,7 +57,7 @@ class QAServiceClient:
             timeout=timeout_seconds,
         )
 
-    def ask(self, question: str, context: str | None = None) -> str:
+    def ask(self, question: str, context: str | None = None) -> dict:
         """Отправляет вопрос в QA-сервис одной попыткой.
 
         Args:
@@ -65,7 +65,10 @@ class QAServiceClient:
             context: Дополнительный контекст.
 
         Returns:
-            str: Ответ QA-сервиса.
+            dict: Ответ QA-сервиса с ключами:
+                - answer: str — текст ответа
+                - expanded_query: str | None — расширенный запрос
+                - keywords: dict | None — извлечённые ключевые слова
 
         Raises:
             QAServiceError: При ошибке запроса.
@@ -77,7 +80,12 @@ class QAServiceClient:
                 "context": context,
             },
         )
-        return payload["answer"]
+        return {
+            "answer": payload.get("answer", ""),
+            "expanded_query": payload.get("expanded_query"),
+            "keywords": payload.get("keywords"),
+            "model": payload.get("model", ""),
+        }
 
     def generate_holiday_greeting(
         self,
