@@ -34,13 +34,17 @@ class BaseLLMProvider(ABC):
         prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
         """Генерировать ответ.
 
         Args:
-            prompt: Промпт для LLM
+            prompt: Промпт для LLM (используется если messages is None)
             temperature: Температура генерации
             max_tokens: Максимальное количество токенов
+            messages: Список сообщений в формате ChatCompletion
+                [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
+                Если передан, используется вместо prompt.
 
         Returns:
             LLMResponse с ответом

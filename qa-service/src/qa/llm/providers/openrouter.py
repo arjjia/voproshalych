@@ -176,15 +176,21 @@ class OpenRouterProvider(BaseLLMProvider):
             return {"status": "error", "message": f"Unexpected error: {e}", "latency_ms": 0, "error": str(e)}
 
     async def _call_api(
-        self, model: str, prompt: str, temperature: float, max_tokens: int
+        self,
+        model: str,
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
         """Вызвать OpenRouter API с конкретной моделью.
 
         Args:
             model: Модель для использования
-            prompt: Промпт для LLM
+            prompt: Промпт для LLM (fallback если messages is None)
             temperature: Температура генерации
             max_tokens: Максимальное количество токенов
+            messages: Список сообщений ChatCompletion (приоритет над prompt)
 
         Returns:
             LLMResponse с ответом
@@ -202,9 +208,11 @@ class OpenRouterProvider(BaseLLMProvider):
             "X-Title": "Voproshalych",
         }
 
+        api_messages = messages if messages else [{"role": "user", "content": prompt}]
+
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": api_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -241,6 +249,7 @@ class OpenRouterProvider(BaseLLMProvider):
         prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
         """Генерировать ответ через OpenRouter API с fallback логикой.
 
@@ -248,9 +257,10 @@ class OpenRouterProvider(BaseLLMProvider):
         пробует fallback модель (openrouter/free).
 
         Args:
-            prompt: Промпт для LLM
+            prompt: Промпт для LLM (fallback если messages is None)
             temperature: Температура генерации
             max_tokens: Максимальное количество токенов
+            messages: Список сообщений ChatCompletion (приоритет над prompt)
 
         Returns:
             LLMResponse с ответом
@@ -263,7 +273,7 @@ class OpenRouterProvider(BaseLLMProvider):
         for model in self._models:
             try:
                 logger.debug(f"OpenRouter: trying model {model}")
-                return await self._call_api(model, prompt, temperature, max_tokens)
+                return await self._call_api(model, prompt, temperature, max_tokens, messages)
             except Exception as e:
                 logger.warning(f"OpenRouter model {model} failed: {e}")
                 last_error = e
@@ -275,7 +285,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     f"OpenRouter: trying fallback model {self._fallback_model}"
                 )
                 return await self._call_api(
-                    self._fallback_model, prompt, temperature, max_tokens
+                    self._fallback_model, prompt, temperature, max_tokens, messages
                 )
             except Exception as e:
                 logger.warning(

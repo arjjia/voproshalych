@@ -90,18 +90,21 @@ class MistralProvider(BaseLLMProvider):
         prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
         config = get_llm_config()
         timeout = float(config.mistral_timeout)
 
+        api_messages = messages if messages else [{"role": "user", "content": prompt}]
+
         payload = {
             "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": api_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
 
-        logger.info(f"Mistral request: model={self._model}, prompt_len={len(prompt)} chars, timeout={timeout}s")
+        logger.info(f"Mistral request: model={self._model}, prompt_len={len(prompt)} chars, messages={len(api_messages)}, timeout={timeout}s")
 
         last_error = None
 

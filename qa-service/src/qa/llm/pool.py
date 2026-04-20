@@ -74,14 +74,16 @@ class LLMPool:
         temperature: float | None = None,
         max_tokens: int | None = None,
         provider_name: str | None = None,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
         """Вызвать LLM с fallback логикой.
 
         Args:
-            prompt: Промпт для LLM
+            prompt: Промпт для LLM (используется если messages is None)
             temperature: Температура генерации (по умолчанию из конфига)
             max_tokens: Максимальное количество токенов (по умолчанию из конфига)
             provider_name: Конкретный провайдер (опционально)
+            messages: Список сообщений ChatCompletion (приоритет над prompt)
 
         Returns:
             LLMResponse с ответом
@@ -119,8 +121,12 @@ class LLMPool:
                     prompt=prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    messages=messages,
                 )
-                logger.debug(f"Provider {prov_name} succeeded")
+                logger.debug(
+                    f"Provider {prov_name} succeeded, "
+                    f"tokens: {response.usage}"
+                )
                 return response
             except Exception as e:
                 logger.warning(f"Provider {prov_name} failed: {e}")

@@ -102,10 +102,12 @@ class OllamaProvider(BaseLLMProvider):
         prompt: str,
         temperature: float = 1.0,
         max_tokens: int = 2048,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
-        payload = {
-            "model": self._model,
-            "messages": [
+        if messages:
+            api_messages = messages
+        else:
+            api_messages = [
                 {
                     "role": "system",
                     "content": (
@@ -117,7 +119,10 @@ class OllamaProvider(BaseLLMProvider):
                     ),
                 },
                 {"role": "user", "content": prompt},
-            ],
+            ]
+        payload = {
+            "model": self._model,
+            "messages": api_messages,
             "stream": False,
             "think": False,
             "options": {

@@ -118,13 +118,15 @@ class GigaChatProvider(BaseLLMProvider):
         prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        messages: list[dict] | None = None,
     ) -> LLMResponse:
         """Генерировать ответ через GigaChat API.
 
         Args:
-            prompt: Промпт для LLM
+            prompt: Промпт для LLM (fallback если messages is None)
             temperature: Температура генерации
             max_tokens: Максимальное количество токенов
+            messages: Список сообщений ChatCompletion (приоритет над prompt)
 
         Returns:
             LLMResponse с ответом
@@ -132,7 +134,8 @@ class GigaChatProvider(BaseLLMProvider):
         Raises:
             Exception: При ошибке API
         """
-        logger.info(f"GigaChat request: prompt_len={len(prompt)} chars, timeout={self._timeout}s")
+        api_messages = messages if messages else [{"role": "user", "content": prompt}]
+        logger.info(f"GigaChat request: prompt_len={len(prompt)} chars, messages={len(api_messages)}, timeout={self._timeout}s")
         backoff_factor = 0.5
 
         async def _make_request():
@@ -141,7 +144,7 @@ class GigaChatProvider(BaseLLMProvider):
             def _sync_chat():
                 return client.chat(
                     {
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": api_messages,
                         "temperature": temperature,
                         "max_tokens": max_tokens,
                     }
