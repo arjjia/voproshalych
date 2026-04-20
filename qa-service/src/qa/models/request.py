@@ -19,18 +19,20 @@ class QAResponse(BaseModel):
     """Ответ от QA сервиса.
 
     Attributes:
-        answer: Ответ от LLM
+        answer: Ответ от LLM (чистый текст без markdown)
         model: Использованная модель
-        sources: Источники (если есть)
+        sources: URL источников
         expanded_query: Расширенный запрос (опционально)
-        keywords: Ключевые слова, извлечённые LightRAG (опционально)
+        keywords: Ключевые слова (опционально)
+        question_type: Тип вопроса (1=БЗ, 2=система, 3=общий)
     """
 
     answer: str
     model: str
     sources: list[str] = Field(default_factory=list)
-    expanded_query: str | None = Field(default=None, max_length=5000)
+    expanded_query: str | None = Field(default=None, max_length=1500)
     keywords: dict | None = Field(default=None)
+    question_type: int = Field(default=1)
 
 
 class HolidayGreetingRequest(BaseModel):
