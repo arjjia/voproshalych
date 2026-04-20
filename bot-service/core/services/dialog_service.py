@@ -90,12 +90,14 @@ class DialogService:
         finally:
             session.close()
 
-    def build_context(self, session_id: int, limit: int) -> str:
+    def build_context(self, session_id: int, max_chars: int = 1500) -> str:
         """Собирает последние сообщения текущей сессии в текстовый контекст.
+
+        Берёт ВСЕ последние сообщения, пока суммарная длина не превышает max_chars.
 
         Args:
             session_id: Идентификатор сессии.
-            limit: Максимальное количество сообщений в контексте.
+            max_chars: Максимальное количество символов в контексте.
 
         Returns:
             str: Текст контекста или пустая строка.
@@ -107,16 +109,20 @@ class DialogService:
                 session.query(DialogMessage)
                 .filter(DialogMessage.session_id == session_id)
                 .order_by(DialogMessage.id.desc())
-                .limit(limit)
                 .all()
             )
             if not messages:
                 return ""
 
             lines = []
-            for message in reversed(messages):
-                role = "Пользователь" if message.role == USER_ROLE else "Бот"
-                lines.append(f"{role}: {message.content}")
+            total_chars = 0
+            for msg in messages:
+                role = "Пользователь" if msg.role == USER_ROLE else "Бот"
+                line = f"{role}: {msg.content}"
+                if total_chars + len(line) + 1 > max_chars:
+                    break
+                lines.insert(0, line)
+                total_chars += len(line) + 1
             return "\n".join(lines)
         finally:
             session.close()

@@ -35,8 +35,8 @@ class Settings:
         "MAX_BOT_INTERNAL_URL",
         "http://max-bot:8081",
     )
-    dialog_context_limit_messages: int = int(
-        os.getenv("DIALOG_CONTEXT_LIMIT_MESSAGES", "7")
+    dialog_context_max_chars: int = int(
+        os.getenv("DIALOG_CONTEXT_MAX_CHARS", "1500")
     )
     holiday_newsletter_enabled: bool = _parse_bool(
         os.getenv("HOLIDAY_NEWSLETTER_ENABLED", "true"),

@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -154,7 +155,7 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
         pending_message: Message | None = None
         if should_show_pending_message(message):
-            pending_message = await message.answer("Ищу ответ на ваш вопрос...")
+            pending_message = await message.answer("Сейчас я попробую ответить на этот вопрос, это может занять какое-то время...")
 
         try:
             bot_response = await core_client.process_message(message)
@@ -206,10 +207,32 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
         for action in bot_response.get("actions", []):
             if action.get("type") == "send_text" and action.get("text"):
-                await message.answer(
-                    action["text"],
-                    reply_markup=build_inline_keyboard(action.get("buttons", [])),
-                )
+                text = action["text"]
+                keyboard = build_inline_keyboard(action.get("buttons", []))
+                try:
+                    await message.answer(text, reply_markup=keyboard)
+                except TelegramBadRequest as exc:
+                    if "too long" in str(exc).lower() and len(text) > 4000:
+                        truncated = text[:3950] + "\n\n..."
+                        try:
+                            await message.answer(truncated, reply_markup=keyboard)
+                        except TelegramBadRequest:
+                            await message.answer(
+                                "Ответ слишком длинный. "
+                                "Попробуйте переформулировать вопрос.",
+                                reply_markup=keyboard,
+                            )
+                    else:
+                        logging.error(f"Telegram bad request: {exc}")
+                        await message.answer(
+                            "Не удалось отправить ответ. "
+                            "Попробуйте переформулировать вопрос.",
+                        )
+                except Exception:
+                    logging.exception("Failed to send Telegram message")
+                    await message.answer(
+                        "Что-то пошло не так. Попробуйте ещё раз."
+                    )
 
     @dispatcher.callback_query()
     async def handle_callback(callback: CallbackQuery) -> None:
@@ -322,7 +345,7 @@ def should_show_pending_message(message: Message) -> bool:
         return False
 
     normalized_text = (message.text or "").strip().lower()
-    return normalized_text not in {"/start", "/ping"}
+    return normalized_text not in {"/start"}
 
 
 async def delete_message_safely(message: Message | None) -> None:

@@ -153,10 +153,16 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
         for action in bot_response.get("actions", []):
             if action.get("type") == "send_text" and action.get("text"):
-                await message.answer(
-                    action["text"],
-                    keyboard=build_inline_keyboard(action.get("buttons", [])),
-                )
+                text = action["text"]
+                keyboard = build_inline_keyboard(action.get("buttons", []))
+                try:
+                    await message.answer(text, keyboard=keyboard)
+                except Exception:
+                    logging.exception("Failed to send VK message")
+                    if len(text) > 4000:
+                        await message.answer(text[:3950] + "\n\n...", keyboard=keyboard)
+                    else:
+                        await message.answer("Не удалось отправить ответ.")
 
     @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=GroupTypes.MessageEvent)
     async def handle_callback(event: GroupTypes.MessageEvent) -> None:
@@ -364,7 +370,7 @@ def should_show_pending_message(message: Message) -> bool:
         return False
 
     normalized_text = (message.text or "").strip().lower()
-    return normalized_text not in {"/start", "/ping"}
+    return normalized_text not in {"/start"}
 
 
 async def send_pending_message(bot: Bot, message: Message) -> int | None:

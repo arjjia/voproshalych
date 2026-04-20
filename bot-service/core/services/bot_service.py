@@ -1,5 +1,8 @@
 """Точка входа в бизнес-логику для обработки нормализованных сообщений."""
 
+import logging
+import re
+
 from config import settings
 from models.callback import CallbackEvent
 from models.message import IncomingMessage
@@ -8,6 +11,8 @@ from services.dialog_service import DialogService
 from services.holiday_newsletter import HolidayNewsletterService
 from services.qa_service_client import QAServiceClient
 from services.user_service import UserService
+
+logger = logging.getLogger(__name__)
 
 
 class BotService:
@@ -71,9 +76,9 @@ class BotService:
                     OutgoingAction(
                         type=ActionType.send_text,
                         text=(
-                            "Вы подписаны на праздничную рассылку."
+                            "Вы подписались на поздравления с праздниками!"
                             if user.is_subscribed
-                            else "Вы отписались от праздничной рассылки."
+                            else "Вы отписались от поздравлений."
                         ),
                         buttons=self._build_start_buttons(user.is_subscribed),
                     )
@@ -107,7 +112,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="Новый диалог начат. Можете отправить следующий вопрос.",
+                        text="История сброшена! Задавайте новый вопрос 🔄",
                     )
                 ]
             )
@@ -117,7 +122,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="Спасибо за положительную оценку.",
+                        text="Рад помочь! 😻",
                     )
                 ]
             )
@@ -127,7 +132,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="Спасибо за оценку. Учту это в следующих ответах.",
+                        text="Спасибо за обратную связь, постараюсь стать лучше! 🐱",
                     )
                 ]
             )
@@ -167,12 +172,10 @@ class BotService:
 
         if lowered_text == "/start":
             return self._build_start_response(message, user)
-        if lowered_text == "/ping":
-            reply_text = "pong"
-        elif self._is_service_command(lowered_text):
+        if self._is_service_command(lowered_text):
             return self._build_service_command_response()
-        else:
-            reply_text = self._handle_dialog_message(normalized_text, user)
+
+        reply_text = self._handle_dialog_message(normalized_text, user)
 
         return BotResponse(
             actions=[
@@ -196,15 +199,17 @@ class BotService:
         """
 
         if user is None:
-            return self._ask_qa_service(question).get("answer", "")
+            qa_result = self._ask_qa_service(question)
+            return self._format_qa_answer(qa_result)
 
         dialog_session = self._dialog_service.get_or_create_active_session(user.id)
         if dialog_session is None:
-            return self._ask_qa_service(question).get("answer", "")
+            qa_result = self._ask_qa_service(question)
+            return self._format_qa_answer(qa_result)
 
         history = self._dialog_service.build_context(
             session_id=dialog_session.id,
-            limit=settings.dialog_context_limit_messages,
+            max_chars=settings.dialog_context_max_chars,
         )
         qa_result = self._ask_qa_service(
             question=question,
@@ -218,7 +223,7 @@ class BotService:
             keywords=qa_result.get("keywords"),
             model_used=qa_result.get("model"),
         )
-        return qa_result.get("answer", "")
+        return self._format_qa_answer(qa_result)
 
     def _handle_voice_message(self, message: IncomingMessage) -> BotResponse:
         """Обрабатывает голосовое сообщение.
@@ -274,11 +279,8 @@ class BotService:
             context: История диалога или другой дополнительный контекст.
 
         Returns:
-            dict: Ответ с ключами answer, expanded_query, keywords, model.
+            dict: Ответ с ключами answer, expanded_query, keywords, model, sources, question_type.
         """
-        import json
-        import logging
-
         from services.qa_service_client import (
             QAServiceTimeout,
             QAServiceUnavailable,
@@ -286,21 +288,29 @@ class BotService:
             QAServiceError,
         )
 
-        logger = logging.getLogger(__name__)
-
         try:
-            return self._qa_service_client.ask(question=question, context=context)
+            logger.info(
+                f"Sending to QA: question='{question[:80]}', "
+                f"context_len={len(context or '')}"
+            )
+            result = self._qa_service_client.ask(question=question, context=context)
+            logger.info(
+                f"QA response: answer_len={len(result.get('answer', ''))}, "
+                f"type={result.get('question_type')}, "
+                f"sources={len(result.get('sources', []))}"
+            )
+            return result
         except QAServiceTimeout:
             logger.error("QA service timeout")
             return {"answer": (
-                "Поиск ответа занимает дольше обычного. "
-                "Попробуйте переформулировать вопрос или повторить позже."
+                "Не удалось быстро найти ответ. "
+                "Попробуйте переформулировать или повторить вопрос чуть позже."
             )}
         except QAServiceUnavailable:
             logger.error("QA service unavailable")
             return {"answer": (
                 "Сервис временно недоступен. "
-                "Мы уже работаем над устранением проблемы. Попробуйте через несколько минут."
+                "Мы уже работаем над устранением проблемы. Попробуйте через пару минут."
             )}
         except QAServiceRateLimited:
             logger.error("QA service rate limited")
@@ -310,10 +320,51 @@ class BotService:
             )}
         except QAServiceError as e:
             logger.error(f"QA service error: {e}")
-            return {"answer": "Не удалось сформировать ответ. Попробуйте переформулировать вопрос."}
+            return {"answer": (
+                "Не удалось сформировать ответ. "
+                "Попробуйте переформулировать вопрос."
+            )}
         except Exception as e:
             logger.error(f"Unexpected QA error: {e}")
-            return {"answer": "Что-то пошло не так. Попробуйте повторить запрос позже."}
+            return {"answer": (
+                "Что-то пошло не так. Попробуйте повторить запрос позже."
+            )}
+
+    def _format_qa_answer(self, qa_result: dict) -> str:
+        """Форматирует ответ QA для отправки в мессенджер.
+
+        Добавляет блок "Подробнее:" с ссылками из sources.
+        Удаляет оставшийся markdown (safety-net).
+        Обрезает слишком длинные ответы.
+
+        Args:
+            qa_result: Ответ от QA-сервиса.
+
+        Returns:
+            str: Отформатированный ответ.
+        """
+        answer = qa_result.get("answer", "")
+        sources = qa_result.get("sources", [])
+
+        answer = self._strip_remaining_markdown(answer)
+
+        if sources:
+            link_lines = [f"Подробнее: {url}" for url in sources[:3]]
+            answer = f"{answer}\n\n" + "\n".join(link_lines)
+
+        if len(answer) > 3900:
+            answer = answer[:3850] + "\n\n..."
+
+        return answer
+
+    def _strip_remaining_markdown(self, text: str) -> str:
+        """Удалить оставшийся markdown (safety-net после qa-service)."""
+        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+        text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     def _is_service_command(self, normalized_text: str) -> bool:
         """Определяет, является ли сообщение сервисной slash-командой.
@@ -361,16 +412,21 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=(
-                        "Привет! Я бот-помощник.\n\n"
-                        "Сейчас я умею:\n"
-                        "• отвечать на текстовые вопросы;\n"
-                        "• принимать голосовые сообщения и готовиться к их "
-                        "распознаванию;\n"
-                        "• сохранять ваши настройки подписки на праздничную "
-                        "рассылку.\n\n"
-                        "Кнопка «Начать новый диалог» уже подготовлена и будет "
-                        "использоваться для сброса истории общения.\n"
-                        "Если хотите, можете сразу задать вопрос сообщением ниже."
+                        "Привет! Я бот-помощник Вопрошалыч.\n\n"
+                        "Я отвечаю на вопросы об обучении в ТюмГУ — "
+                        "от расписания и стипендий до общежитий и документов.\n\n"
+                        "Источники информации:\n"
+                        "• utmn.ru — официальный сайт ТюмГУ\n"
+                        "• sveden.utmn.ru — сведения об образовательной организации\n"
+                        "• confluence.utmn.ru — внутренняя база знаний\n\n"
+                        "Кнопка «Начать новый диалог» сбрасывает историю общения — "
+                        "я начну отвечать без учёта предыдущих вопросов.\n\n"
+                        "Подписка на поздравления с праздниками доступна "
+                        "через кнопку ниже!\n\n"
+                        "Используется искусственный интеллект, поэтому ответы "
+                        "могут содержать неточности. Продолжая работу с ботом, "
+                        "вы даёте согласие на обработку персональных данных "
+                        "и получение сообщений."
                     ),
                     buttons=self._build_start_buttons(is_subscribed),
                 )
@@ -415,7 +471,7 @@ class BotService:
 
         return [
             [
-                InlineButton(text="👍", callback_data="feedback:like"),
+                InlineButton(text="❤️", callback_data="feedback:like"),
                 InlineButton(text="👎", callback_data="feedback:dislike"),
             ]
         ]

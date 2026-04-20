@@ -1,6 +1,8 @@
-"""Клиент для обращения к QA-сервису без неявных повторных запросов."""
+"""Клиент для обращения к QA-сервису."""
 
 import logging
+import uuid
+
 import httpx
 
 
@@ -69,22 +71,30 @@ class QAServiceClient:
                 - answer: str — текст ответа
                 - expanded_query: str | None — расширенный запрос
                 - keywords: dict | None — извлечённые ключевые слова
+                - model: str — модель
+                - sources: list[str] — URL источников
+                - question_type: int — тип вопроса (1/2/3)
 
         Raises:
             QAServiceError: При ошибке запроса.
         """
+        request_id = uuid.uuid4().hex[:8]
+        headers = {"X-Request-ID": request_id}
         payload = self._post_json(
             "/qa",
             {
                 "question": question,
                 "context": context,
             },
+            headers=headers,
         )
         return {
             "answer": payload.get("answer", ""),
             "expanded_query": payload.get("expanded_query"),
             "keywords": payload.get("keywords"),
             "model": payload.get("model", ""),
+            "sources": payload.get("sources", []),
+            "question_type": payload.get("question_type", 1),
         }
 
     def generate_holiday_greeting(
@@ -119,10 +129,15 @@ class QAServiceClient:
         )
         return payload["message"]
 
-    def _post_json(self, path: str, payload: dict[str, object]) -> dict[str, object]:
+    def _post_json(
+        self,
+        path: str,
+        payload: dict[str, object],
+        headers: dict | None = None,
+    ) -> dict[str, object]:
         """Выполнить одиночный POST-запрос и преобразовать ошибки в доменные."""
         try:
-            response = self._client.post(path, json=payload)
+            response = self._client.post(path, json=payload, headers=headers or {})
             response.raise_for_status()
             return response.json()
         except httpx.TimeoutException as exc:
