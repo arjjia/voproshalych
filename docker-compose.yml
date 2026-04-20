@@ -47,6 +47,7 @@ services:
       QA_SERVICE_URL: ${QA_SERVICE_URL:-http://qa-service:8004}
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
+      POSTGRES_DATABASE: ${POSTGRES_DB:-voproshalych}
       POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
       HF_TOKEN: ${HF_TOKEN:-}

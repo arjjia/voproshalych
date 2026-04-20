@@ -383,13 +383,103 @@ def doc_exists_in_db(url: str, source_type: str, file_url: str | None, title: st
         return result.fetchone() is not None
 
 
+def _remove_doc_from_graph_properties(conn, doc_id: str, chunk_ids: list[str]) -> None:
+    """Удалить ссылки на документ из properties AGE-графа (source_id, file_path).
+
+    Entities/relations в графе могут быть вмержены из нескольких документов.
+    Нужно убрать только chunk_ids и file_path данного документа, сохранив остальные.
+    Если после очистки source_id пуст — node/edge можно удалить.
+    """
+    fp_pattern = f"%{doc_id}%"
+
+    rows = conn.execute(text("""
+        SELECT id, start_id, end_id, properties::text as props
+        FROM chunk_entity_relation."DIRECTED"
+        WHERE properties::text LIKE :fp
+    """), {"fp": fp_pattern}).fetchall()
+    logger.info(f"force_delete_graph: found {len(rows)} edges to clean for doc {doc_id}")
+    _clean_graph_elements(conn, rows, chunk_ids, doc_id, is_edge=True)
+
+    rows_v = conn.execute(text("""
+        SELECT id, NULL, NULL, properties::text as props
+        FROM chunk_entity_relation."base"
+        WHERE properties::text LIKE :fp
+    """), {"fp": fp_pattern}).fetchall()
+    logger.info(f"force_delete_graph: found {len(rows_v)} vertices to clean for doc {doc_id}")
+    _clean_graph_elements(conn, rows_v, chunk_ids, doc_id, is_edge=False)
+
+
+def _clean_sep_field(value: str | None, remove_ids: set[str]) -> str | None:
+    """Убрать remove_ids из <SEP>-разделённого поля. Вернуть None если поле пустое."""
+    if not value:
+        return value
+    parts = [p for p in value.split("<SEP>") if p not in remove_ids]
+    return "<SEP>".join(parts) if parts else None
+
+
+def _escape_cypher_str(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+
+
+def _clean_graph_elements(conn, elements, chunk_ids: list[str], doc_id: str, is_edge: bool) -> None:
+    """Обновить или удалить элементы графа (nodes/edges) после очистки source_id."""
+    chunk_set = set(chunk_ids)
+    for eid, start_id, end_id, props_text in elements:
+        try:
+            props = json.loads(props_text) if isinstance(props_text, str) else {}
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        new_source = _clean_sep_field(props.get("source_id"), chunk_set)
+        new_file_path = _clean_sep_field(props.get("file_path"), {doc_id})
+
+        if not new_source and not new_file_path:
+            if is_edge:
+                cypher = f"MATCH ()-[r]-() WHERE id(r) = {eid} DELETE r"
+            else:
+                cypher = f"MATCH (n) WHERE id(n) = {eid} DETACH DELETE n"
+            try:
+                conn.execute(text(
+                    f"SELECT * FROM cypher('chunk_entity_relation', "
+                    f"$${cypher}$$) AS (r agtype)"
+                ))
+                logger.debug(f"force_delete_graph: deleted orphan {'edge' if is_edge else 'vertex'} {eid}")
+            except Exception as e:
+                logger.warning(f"force_delete_graph: could not delete {eid}: {e}")
+        else:
+            sets = []
+            if new_source is not None:
+                sets.append(f"n.source_id = '{_escape_cypher_str(new_source)}'")
+            else:
+                sets.append("n.source_id = ''")
+            if new_file_path is not None:
+                sets.append(f"n.file_path = '{_escape_cypher_str(new_file_path)}'")
+            else:
+                sets.append("n.file_path = ''")
+            set_clause = ", ".join(sets)
+            try:
+                if is_edge:
+                    cypher = f"MATCH ()-[n]-() WHERE id(n) = {eid} SET {set_clause}"
+                else:
+                    cypher = f"MATCH (n) WHERE id(n) = {eid} SET {set_clause}"
+                conn.execute(text(
+                    f"SELECT * FROM cypher('chunk_entity_relation', "
+                    f"$${cypher}$$) AS (r agtype)"
+                ))
+                logger.debug(f"force_delete_graph: cleaned {'edge' if is_edge else 'vertex'} {eid}")
+            except Exception as e:
+                logger.warning(f"force_delete_graph: could not update {eid}: {e}")
+
+
 def force_delete_doc(url: str, source_type: str, file_url: str | None, title: str) -> None:
-    """Удалить документ и все его чанки из всех таблиц LightRAG."""
+    """Удалить документ и все его чанки из всех таблиц LightRAG и AGE-графа."""
     engine = get_engine()
     doc_key = make_doc_key(source_type, file_url, url, title)
     doc_id = hashlib.sha1(doc_key.encode("utf-8")).hexdigest()[:16]
 
     with engine.connect() as conn:
+        conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+
         chunk_rows = conn.execute(
             text("SELECT id FROM lightrag_doc_chunks WHERE full_doc_id = :doc_id"),
             {"doc_id": doc_id},
@@ -413,9 +503,14 @@ def force_delete_doc(url: str, source_type: str, file_url: str | None, title: st
         conn.execute(text("DELETE FROM lightrag_full_entities WHERE id = :doc_id"), {"doc_id": doc_id})
         conn.execute(text("DELETE FROM lightrag_full_relations WHERE id = :doc_id"), {"doc_id": doc_id})
 
-        conn.commit()
+        try:
+            conn.execute(text("LOAD 'age'"))
+            conn.execute(text('SET search_path = ag_catalog, "$user", public'))
+            _remove_doc_from_graph_properties(conn, doc_id, chunk_ids)
+        except Exception as e:
+            logger.warning(f"force_delete: AGE graph cleanup failed (non-fatal): {e}")
 
-    logger.info(f"force_delete: документ {doc_id} удалён из всех таблиц")
+    logger.info(f"force_delete: документ {doc_id} удалён из всех таблиц и графа")
 
 
 # ---------------------------------------------------------------------------
@@ -709,6 +804,7 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
 
     total_docs = 0
     total_indexed = 0
+    total_skipped = 0
 
     for source_name in selected_sources:
         display_name, iterator = source_jobs[source_name]
@@ -719,27 +815,39 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
 
         doc_count = 0
         indexed_count = 0
+        skipped_count = 0
 
         async for doc in iterator():
             doc_count += 1
             doc_idx = doc_count
 
-            success = await insert_document_to_lightrag(rag, doc, doc_idx, no_graph)
-            if success:
-                indexed_count += 1
+            try:
+                if doc_exists_in_db(doc.url, doc.source_type, doc.file_url, doc.title):
+                    logger.info(f"[{doc_idx}] SKIP (уже в БД): {doc.title}")
+                    skipped_count += 1
+                    continue
+
+                success = await insert_document_to_lightrag(rag, doc, doc_idx, no_graph)
+                if success:
+                    indexed_count += 1
+            except Exception as e:
+                logger.error(f"[{doc_idx}] ERROR processing '{doc.title}': {e}")
+                continue
 
             if doc_count % 10 == 0:
-                logger.info(f"Прогресс: {doc_count} документов обработано")
+                logger.info(f"Прогресс: {doc_count} документов обработано, {skipped_count} пропущено")
 
-        logger.info(f"Источник {display_name}: {doc_count} документов, {indexed_count} проиндексировано")
+        logger.info(f"Источник {display_name}: {doc_count} документов, {indexed_count} проиндексировано, {skipped_count} пропущено")
         total_docs += doc_count
         total_indexed += indexed_count
+        total_skipped += skipped_count
 
     logger.info("")
     logger.info("=" * 50)
     logger.info(f"Заполнение завершено!")
     logger.info(f"Всего документов: {total_docs}")
     logger.info(f"Проиндексировано: {total_indexed}")
+    logger.info(f"Пропущено (дубли): {total_skipped}")
     logger.info("=" * 50)
 
 

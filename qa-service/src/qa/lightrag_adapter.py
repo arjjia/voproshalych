@@ -66,7 +66,11 @@ relation{{tuple_delimiter}}Wi-Fi университета{{tuple_delimiter}}Ко
 
 _tokenizer = None
 
-_SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+(?=[А-ЯЁA-Z])')
+_SENTENCE_SPLIT_RE = re.compile(
+    r'(?<=[.!?])\s+(?=[А-ЯЁA-Z])'
+    r'|(?<=;)\s*\n(?=\s*—)'
+    r'|(?<=:)\s*\n(?=\s*—)'
+)
 
 
 class HuggingFaceTokenizer:
@@ -148,6 +152,24 @@ def sentence_aware_chunking(
 
     for sent in sentences:
         sent_tokens = len(tokenizer.encode(sent))
+
+        if sent_tokens > chunk_token_size * 1.5:
+            sub_lines = [s.strip() for s in sent.split('\n') if s.strip()]
+            if len(sub_lines) > 1:
+                for line in sub_lines:
+                    line_tokens = len(tokenizer.encode(line))
+                    if current_tokens + line_tokens > chunk_token_size and current_sentences:
+                        chunk_text = " ".join(current_sentences)
+                        chunks.append({
+                            "tokens": current_tokens,
+                            "content": chunk_text.strip(),
+                            "chunk_order_index": len(chunks),
+                        })
+                        current_sentences = []
+                        current_tokens = 0
+                    current_sentences.append(line)
+                    current_tokens += line_tokens
+                continue
 
         if current_tokens + sent_tokens > chunk_token_size and current_sentences:
             chunk_text = " ".join(current_sentences)
