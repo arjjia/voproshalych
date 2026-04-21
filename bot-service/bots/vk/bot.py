@@ -350,15 +350,13 @@ def build_reply_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:
     if not button_rows:
         return None
 
-    from vkbottle import KeyboardButton, Text
-
-    keyboard = Keyboard(inline=False)
+    keyboard = Keyboard(inline=False, one_time=False)
     for row_index, row in enumerate(button_rows):
         if row_index > 0:
             keyboard.row()
 
         for button in row:
-            keyboard.add(KeyboardButton(Text(button["text"])))
+            keyboard.add(KeyboardButton(text=button["text"]))
 
     return keyboard.get_json()
 
