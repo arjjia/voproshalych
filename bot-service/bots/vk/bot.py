@@ -141,7 +141,7 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
         is_start = text in {"/start", "start", "начать"}
 
         pending_message_id: int | None = None
-        if should_show_pending_message(message) or is_start:
+        if should_show_pending_message(message):
             pending_message_id = await send_pending_message(bot, message)
 
         try:
