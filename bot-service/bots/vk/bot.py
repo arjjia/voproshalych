@@ -189,6 +189,21 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
             return
 
         try:
+            await bot.api.messages.send_message_event_answer(
+                event_id=event_id,
+                user_id=user_id,
+                peer_id=peer_id,
+                event_data=json.dumps(
+                    {
+                        "type": "show_snackbar",
+                        "text": "⏳",
+                    }
+                ),
+            )
+        except Exception:
+            pass
+
+        try:
             bot_response = await core_client.process_callback(event)
         except httpx.HTTPStatusError as e:
             logging.exception("HTTP error from core VK callback")
