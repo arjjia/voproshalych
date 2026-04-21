@@ -130,12 +130,12 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
     bot = Bot(settings.vk_bot_token)
 
-    @bot.on.message(text="/start")
+    @bot.on.message(text=["/start", "START", "Начать", "начать"])
     async def handle_start(message: Message) -> None:
-        """Обрабатывает команду /start.
+        """Обрабатывает команду /start и сообщение 'Начать'.
 
         Args:
-            message: Сообщение VK с /start.
+            message: Сообщение VK с /start или 'Начать'.
         """
         pending_message_id: int | None = None
         if should_show_pending_message(message):
@@ -469,7 +469,7 @@ def should_show_pending_message(message: Message) -> bool:
         return False
 
     normalized_text = (message.text or "").strip().lower()
-    return normalized_text not in {"/start"}
+    return normalized_text not in {"/start", "start", "начать"}
 
 
 async def send_pending_message(bot: Bot, message: Message) -> int | None:
