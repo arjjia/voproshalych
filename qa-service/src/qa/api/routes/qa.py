@@ -42,20 +42,24 @@ def _get_timeouts() -> dict:
     }
 
 
-def _format_search_context(data: dict) -> str:
+def _format_search_context(data: dict) -> tuple[str, dict[str, str]]:
     """Преобразовать результат aquery_data в текстовый контекст для LLM.
+
+    Каждый чанк с URL помечается номером [источник N].
 
     Args:
         data: Результат LightRAG aquery_data.
 
     Returns:
-        Строка с чанками, сущностями и ссылками.
+        Кортеж (контекст, маппинг {номер: URL}).
     """
     if data.get("status") != "success":
-        return ""
+        return "", {}
 
     result_data = data.get("data", {})
     parts = []
+    source_index: dict[str, str] = {}
+    counter = 1
 
     chunks = result_data.get("chunks", [])
     if chunks:
@@ -65,7 +69,12 @@ def _format_search_context(data: dict) -> str:
             file_path = chunk.get("file_path", "")
             if content:
                 text = content.strip()
-                if file_path:
+                if file_path and file_path.startswith("http"):
+                    tag = f"[источник {counter}]"
+                    source_index[str(counter)] = file_path
+                    text += f"\n{tag}"
+                    counter += 1
+                elif file_path:
                     text += f"\nИсточник: {file_path}"
                 chunk_texts.append(text)
         if chunk_texts:
@@ -94,7 +103,7 @@ def _format_search_context(data: dict) -> str:
         if rel_lines:
             parts.append("--- Связи ---\n" + "\n".join(rel_lines))
 
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), source_index
 
 
 def _extract_sources_from_data(data: dict) -> list[str]:
@@ -125,6 +134,55 @@ def _extract_sources_from_data(data: dict) -> list[str]:
             sources.add(fp)
 
     return list(sources)
+
+
+def _filter_used_sources(
+    raw_answer: str,
+    all_sources: list[str],
+    source_index: dict[str, str],
+) -> list[str]:
+    """Отфильтровать источники по тем, которые LLM реально использовал.
+
+    LLM указывает использованные источники строкой вида:
+    Использованные источники: 1
+
+    Args:
+        raw_answer: Сырой ответ LLM.
+        all_sources: Все найденные URL.
+        source_index: Маппинг {номер: URL}.
+
+    Returns:
+        Список URL только использованных источников (не более 1).
+    """
+    import re
+
+    if not source_index:
+        return all_sources[:1] if all_sources else []
+
+    match = re.search(
+        r"[Ии]спользованн?ые?\s+источники:\s*([\d,\s]+)",
+        raw_answer,
+    )
+    if not match:
+        match = re.search(r"Источники:\s*([\d,\s]+)", raw_answer)
+
+    if match:
+        used_indices = set()
+        for part in match.group(1).split(","):
+            part = part.strip()
+            if part.isdigit():
+                used_indices.add(part)
+
+        used_urls = []
+        for idx in sorted(used_indices, key=int):
+            url = source_index.get(idx)
+            if url and url not in used_urls:
+                used_urls.append(url)
+
+        if used_urls:
+            return used_urls[:1]
+
+    return all_sources[:1] if all_sources else []
 
 
 def _extract_keywords_from_data(data: dict) -> dict:
@@ -276,7 +334,7 @@ async def _handle_kb_question(
         )
         t2_elapsed = time.time() - t2_start
 
-        search_context = _format_search_context(search_data)
+        search_context, source_index = _format_search_context(search_data)
         sources = _extract_sources_from_data(search_data)
         keywords = _extract_keywords_from_data(search_data)
 
@@ -362,7 +420,20 @@ async def _handle_kb_question(
     # ── Phase 3: Post-processing ──
     clean_answer, answer_links = process_llm_response(raw_answer)
 
-    all_sources = list(dict.fromkeys(sources + answer_links))
+    used_sources = _filter_used_sources(raw_answer, sources, source_index)
+
+    # Выбираем ТОЛЬКО ОДНУ наиболее релевантную ссылку
+    if used_sources:
+        final_sources = [used_sources[0]]
+    elif answer_links:
+        final_sources = [answer_links[0]]
+    else:
+        final_sources = []
+
+    logger.info(
+        f"[{req_id}] Sources: {len(sources)} found → "
+        f"1 selected for response"
+    )
 
     total_elapsed = time.time() - start_time
     logger.info(
@@ -373,7 +444,7 @@ async def _handle_kb_question(
     return QAResponse(
         answer=clean_answer,
         model=response.model,
-        sources=all_sources[:5],
+        sources=final_sources,
         keywords=keywords,
     )
 

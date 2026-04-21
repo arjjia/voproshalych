@@ -60,7 +60,8 @@ class LLMPool:
             Имя провайдера или None, если нет доступных
         """
         available = self.get_available_providers()
-        for provider_name in self._config.model_priority:
+        priority_list = self._config.model_priority.split(",") if isinstance(self._config.model_priority, str) else self._config.model_priority
+        for provider_name in priority_list:
             if provider_name in available:
                 logger.debug(f"Selected provider: {provider_name}")
                 return provider_name
@@ -98,8 +99,9 @@ class LLMPool:
             providers_to_try = [provider_name]
         else:
             available = self.get_available_providers()
-            providers_to_try = [
-                p for p in self._config.model_priority if p in available
+            priority_list = self._config.model_priority.split(",") if isinstance(self._config.model_priority, str) else self._config.model_priority
+        providers_to_try = [
+                p for p in priority_list if p in available
             ]
 
         if not providers_to_try:

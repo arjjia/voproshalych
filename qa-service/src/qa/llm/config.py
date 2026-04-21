@@ -64,7 +64,7 @@ class LLMConfig(BaseSettings):
     gigachat_client_id: str = Field(default="")
     gigachat_client_secret: str = Field(default="")
 
-    model_priority: list[str] = Field(default=["openrouter", "mistral", "gigachat"])
+    model_priority: str = Field(default="openrouter,mistral,gigachat")
     lightrag_llm_model: str = Field(default="")
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen3.6:35b")

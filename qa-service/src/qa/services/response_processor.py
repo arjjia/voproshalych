@@ -28,6 +28,7 @@ def clean_markdown(text: str) -> str:
     text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
+    text = re.sub(r"<(\s*https?://[^>]+)\s*>", r"\1", text)
     text = re.sub(r"<entity:[^>]*>", "", text)
     text = re.sub(r"【\d+†[^】]*】", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -37,10 +38,10 @@ def clean_markdown(text: str) -> str:
 def extract_links(text: str) -> tuple[str, list[str]]:
     """Извлечь URL из текста и вернуть чистый текст + список ссылок.
 
-    Ищет ссылки в форматах:
-    - Подробнее: URL
-    - References / Источники секции с URL
-    - Голые URL
+    Обрабатывает ссылки в форматах:
+    - "Подробнее: URL" - добавляет в sources
+    - URLs в тексте - оставляет в тексте, но убирает угловые скобки
+    - [номер] ссылки - удаляет из текста, добавляет в sources если есть URL
 
     Args:
         text: Текст для обработки.
@@ -59,6 +60,7 @@ def extract_links(text: str) -> tuple[str, list[str]]:
 
         if stripped.lower().startswith("подробнее:"):
             link_part = stripped[len("подробнее:"):].strip()
+            link_part = link_part.strip("<>").strip()
             found_urls = url_pattern.findall(link_part)
             urls.extend(found_urls)
             continue
@@ -66,23 +68,26 @@ def extract_links(text: str) -> tuple[str, list[str]]:
         if stripped.lower().startswith("references"):
             continue
 
-        if stripped.startswith("http://") or stripped.startswith("https://"):
-            found_urls = url_pattern.findall(stripped)
-            if found_urls and not stripped.startswith("http"):
-                urls.extend(found_urls)
-                continue
+        if stripped.lower().startswith("источники"):
+            continue
 
-        if re.match(r"^\[\d+\]\s*", stripped):
+        if re.match(r"^\[\d+\]\s*https?://", stripped):
             found_urls = url_pattern.findall(stripped)
             urls.extend(found_urls)
             continue
 
-        if re.match(r"^-\s*\[?\d+\]?\s*https?://", stripped):
+        if re.match(r"^-\s*\[\d+\]\s*https?://", stripped):
             found_urls = url_pattern.findall(stripped)
             urls.extend(found_urls)
             continue
 
-        clean_lines.append(line)
+        line_clean = stripped
+        line_clean = line_clean.replace("<https://", "https://")
+        line_clean = line_clean.replace("https://>", "https://")
+        line_clean = line_clean.replace("<http://", "http://")
+        line_clean = line_clean.replace("http://>", "http://")
+
+        clean_lines.append(line_clean)
 
     clean_text = "\n".join(clean_lines).strip()
     clean_text = re.sub(r"\n{3,}", "\n\n", clean_text)
@@ -126,8 +131,9 @@ def process_llm_response(raw_answer: str) -> tuple[str, list[str]]:
     """Полный пайплайн постобработки ответа LLM.
 
     1. Очистка markdown
-    2. Извлечение ссылок
-    3. Форматирование (обрезка)
+    2. Удаление строки об использованных источниках
+    3. Извлечение ссылок
+    4. Форматирование (обрезка)
 
     Args:
         raw_answer: Сырой ответ от LLM.
@@ -142,6 +148,14 @@ def process_llm_response(raw_answer: str) -> tuple[str, list[str]]:
     cleaned = clean_markdown(raw_answer)
     logger.info(f"[POSTPROCESS] After markdown clean: {len(cleaned)} chars")
 
+    # Remove "Использованные источники:" line if present
+    import re
+    cleaned = re.sub(
+        r"\n*[Ии]спользованн?ые?\s+источники:\s*[\d,\s]+\n*",
+        "\n",
+        cleaned,
+    ).strip()
+    
     cleaned, links = extract_links(cleaned)
     logger.info(
         f"[POSTPROCESS] After link extraction: "
