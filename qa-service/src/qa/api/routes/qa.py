@@ -10,7 +10,6 @@ from fastapi import APIRouter, Header, HTTPException
 
 from ...config.prompts import (
     DIALOG_CONTEXT_PROMPT,
-    NO_DOCUMENT_DATA_RESPONSE,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_ABOUT_BOT,
     SYSTEM_PROMPT_WITH_CONTEXT,
@@ -283,10 +282,34 @@ async def _handle_kb_question(
     )
 
     if not search_context.strip():
-        logger.info(f"[{req_id}] No search context found, using fallback")
+        logger.info(
+            f"[{req_id}] No search context found, "
+            f"generating answer without KB context"
+        )
+        messages = build_messages(
+            system_prompt=SYSTEM_PROMPT,
+            question=original_question,
+            search_context=None,
+            dialog_context=dialog_context,
+            dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
+        )
+
+        response = await asyncio.wait_for(
+            llm_pool.call(prompt="", messages=messages),
+            timeout=timeouts["generation"],
+        )
+        t3_elapsed = time.time() - t2_start
+
+        clean_answer, _ = process_llm_response(response.content)
+
+        logger.info(
+            f"[{req_id}] Phase 2 DONE (no KB context): "
+            f"{t3_elapsed:.1f}s, model={response.model}"
+        )
+
         return QAResponse(
-            answer=NO_DOCUMENT_DATA_RESPONSE,
-            model="no-results",
+            answer=clean_answer,
+            model=response.model,
             sources=[],
             keywords=keywords,
         )

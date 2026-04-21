@@ -274,3 +274,51 @@ class TestQAEndpoint:
             assert "answer" in data
             assert data["question_type"] == 1
             assert len(data["sources"]) > 0
+
+    def test_ask_question_kb_type_no_search_results(self, client):
+        """Тест KB-вопроса без результатов поиска.
+
+        Проверяет что при пустом контексте поиска LLM всё равно
+        генерирует ответ (без KB контекста).
+
+        Args:
+            client: TestClient для выполнения запросов
+        """
+        mock_llm_response = LLMResponse(
+            content="Попробуйте обратиться в деканат.",
+            model="open-mistral-nemo",
+            usage={"prompt_tokens": 30, "completion_tokens": 15, "total_tokens": 45},
+        )
+
+        mock_empty_search_data = {
+            "status": "success",
+            "data": {
+                "chunks": [],
+                "entities": [],
+                "relationships": [],
+            },
+            "metadata": {"keywords": {"high_level": [], "low_level": []}},
+            "references": [],
+        }
+
+        with patch("qa.main.is_lightrag_ready", return_value=True), \
+             patch("qa.services.question_router.classify_and_expand",
+                   new_callable=AsyncMock,
+                   return_value=_mock_classification(question_type=1, expanded_query="запрос")), \
+             patch("qa.api.routes.qa.get_llm_pool") as mock_pool, \
+             patch("qa.main.get_lightrag") as mock_lightrag:
+            mock_pool_instance = MagicMock()
+            mock_pool_instance.call = AsyncMock(return_value=mock_llm_response)
+            mock_pool.return_value = mock_pool_instance
+
+            mock_rag = MagicMock()
+            mock_rag.aquery_data = AsyncMock(return_value=mock_empty_search_data)
+            mock_lightrag.return_value = mock_rag
+
+            response = client.post("/qa", json={"question": "случайный вопрос"})
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "answer" in data
+            assert data["question_type"] == 1
+            assert len(data["sources"]) == 0
