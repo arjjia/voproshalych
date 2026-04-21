@@ -130,6 +130,44 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
     bot = Bot(settings.vk_bot_token)
 
+    @bot.on.message(text="/start")
+    async def handle_start(message: Message) -> None:
+        """Обрабатывает команду /start.
+
+        Args:
+            message: Сообщение VK с /start.
+        """
+        pending_message_id: int | None = None
+        if should_show_pending_message(message):
+            pending_message_id = await send_pending_message(bot, message)
+
+        try:
+            bot_response = await core_client.process_message(message)
+        except httpx.HTTPError:
+            logging.exception("Не удалось обработать /start VK через core")
+            await delete_pending_message(bot, pending_message_id)
+            await message.answer("Сервис временно недоступен.")
+            return
+
+        await delete_pending_message(bot, pending_message_id)
+
+        for action in bot_response.get("actions", []):
+            if action.get("type") == "send_text" and action.get("text"):
+                text = action["text"]
+                if action.get("parse_mode") == "HTML":
+                    text = _strip_html_to_plain(text)
+                keyboard = build_inline_keyboard(action.get("buttons", []))
+                reply_keyboard = build_reply_keyboard(
+                    action.get("reply_keyboard", [])
+                )
+                try:
+                    await message.answer(
+                        text,
+                        keyboard=reply_keyboard or keyboard,
+                    )
+                except Exception:
+                    logging.exception("Failed to send VK /start message")
+
     @bot.on.message()
     async def handle_message(message: Message) -> None:
         """Проксирует сообщения в core-сервис и выполняет действия.
@@ -194,6 +232,20 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
         try:
             bot_response = await core_client.process_callback(event)
+        except httpx.HTTPStatusError as e:
+            logging.exception("HTTP error from core VK callback")
+            await bot.api.messages.send_message_event_answer(
+                event_id=event_id,
+                user_id=user_id,
+                peer_id=peer_id,
+                event_data=json.dumps(
+                    {
+                        "type": "show_snackbar",
+                        "text": "Сервис временно недоступен.",
+                    }
+                ),
+            )
+            return
         except httpx.HTTPError:
             logging.exception("Не удалось обработать callback VK через core")
             await bot.api.messages.send_message_event_answer(
@@ -210,19 +262,18 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
             return
 
         for action in bot_response.get("actions", []):
-            if action.get("type") != "send_text" or not action.get("text"):
-                continue
+            keyboard = build_inline_keyboard(action.get("buttons", []))
 
-            try:
-                await bot.api.messages.send(
-                    peer_id=peer_id,
-                    random_id=random.randint(1, 2_147_483_647),
-                    message=action["text"],
-                    keyboard=build_inline_keyboard(action.get("buttons", [])),
-                )
-            except Exception:
-                logging.exception("Не удалось отправить callback-ответ VK пользователю")
-                return
+            if action.get("text"):
+                try:
+                    await bot.api.messages.send(
+                        peer_id=peer_id,
+                        random_id=random.randint(1, 2_147_483_647),
+                        message=action["text"],
+                        keyboard=keyboard,
+                    )
+                except Exception:
+                    logging.exception("Не удалось отправить callback-ответ VK пользователю")
 
         snackbar_text = next(
             (
@@ -436,7 +487,7 @@ async def send_pending_message(bot: Bot, message: Message) -> int | None:
         return await bot.api.messages.send(
             peer_id=message.peer_id,
             random_id=random.randint(1, 2_147_483_647),
-            message="Скоро будет получен ответ...",
+            message="Сейчас я попробую ответить на этот вопрос, это может занять какое-то время...",
         )
     except Exception:
         logging.exception("Не удалось отправить временное сообщение VK")
