@@ -37,7 +37,7 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-COPY init-extensions.sql /docker-entrypoint-initdb.d/
+COPY init-extensions.sh /docker-entrypoint-initdb.d/
 
 LABEL maintainer="Voproshalych" \
       description="PostgreSQL 17 with pgvector and Apache AGE extensions" \
