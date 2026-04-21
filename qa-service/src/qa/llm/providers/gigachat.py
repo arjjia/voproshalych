@@ -179,8 +179,8 @@ class GigaChatProvider(BaseLLMProvider):
                 error_str = str(e).lower()
                 last_error = e
 
-                is_reauth_error = any(code in str(e) for code in REAUTH_ERROR_CODES)
-                is_retryable = any(code in error_str for code in RETRY_ERROR_CODES)
+                is_reauth_error = any(str(code) in str(e) for code in REAUTH_ERROR_CODES)
+                is_retryable = any(str(code) in error_str for code in RETRY_ERROR_CODES)
 
                 if is_reauth_error:
                     logger.warning(f"GigaChat auth error, recreating client: {e}")
