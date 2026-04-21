@@ -682,7 +682,7 @@ func stripHTMLToPlain(text string) string {
 // с корректными callback_data для обработки в core.
 func convertReplyToInline(rows [][]ReplyKeyboardButton) [][]InlineButton {
 	buttonMapping := map[string]string{
-		"📋 Справка":    "menu:help",
+		"📋 Помощь":      "menu:help",
 		"🔄 Новый диалог": "menu:new_dialog",
 		"🔔 Рассылка":    "menu:subscription",
 	}

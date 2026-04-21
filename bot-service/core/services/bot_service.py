@@ -201,7 +201,7 @@ class BotService:
 
         if lowered_text == "/start":
             return self._build_start_response(message, user)
-        if lowered_text in ("/help", "📋 справка"):
+        if lowered_text in ("/help", "📋 помощь"):
             return self._build_help_response()
         if lowered_text in ("🔄 новый диалог",):
             if user is not None:
@@ -580,11 +580,9 @@ class BotService:
         """
 
         return [
-            [
-                KeyboardButton(text="📋 Справка"),
-                KeyboardButton(text="🔄 Новый диалог"),
-                KeyboardButton(text="🔔 Рассылка"),
-            ]
+            [KeyboardButton(text="📋 Помощь")],
+            [KeyboardButton(text="🔄 Новый диалог")],
+            [KeyboardButton(text="🔔 Рассылка")],
         ]
 
     def _build_feedback_buttons(self) -> list[list[InlineButton]]:
