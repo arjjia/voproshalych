@@ -173,52 +173,6 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
     @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=GroupTypes.MessageEvent)
     async def handle_callback(event: GroupTypes.MessageEvent) -> None:
-        """Проксирует сообщения в core-сервис и выполняет действия.
-
-        Args:
-            message: Сообщение VK, полученное через vkbottle.
-        """
-
-        pending_message_id: int | None = None
-        if should_show_pending_message(message):
-            pending_message_id = await send_pending_message(bot, message)
-
-        try:
-            bot_response = await core_client.process_message(message)
-        except httpx.HTTPError:
-            logging.exception("Не удалось обработать сообщение VK через core")
-            await delete_pending_message(bot, pending_message_id)
-            await message.answer("Сервис временно недоступен.")
-            return
-
-        await delete_pending_message(bot, pending_message_id)
-
-        for action in bot_response.get("actions", []):
-            if action.get("type") == "send_text" and action.get("text"):
-                text = action["text"]
-                if action.get("parse_mode") == "HTML":
-                    text = _strip_html_to_plain(text)
-                keyboard = build_inline_keyboard(action.get("buttons", []))
-                reply_keyboard = build_reply_keyboard(
-                    action.get("reply_keyboard", [])
-                )
-                try:
-                    await message.answer(
-                        text,
-                        keyboard=reply_keyboard or keyboard,
-                    )
-                except Exception:
-                    logging.exception("Failed to send VK message")
-                    if len(text) > 4000:
-                        await message.answer(
-                            text[:3950] + "\n\n...",
-                            keyboard=reply_keyboard or keyboard,
-                        )
-                    else:
-                        await message.answer("Не удалось отправить ответ.")
-
-    @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=GroupTypes.MessageEvent)
-    async def handle_callback(event: GroupTypes.MessageEvent) -> None:
         """Проксирует callback VK в core и подтверждает результат.
 
         Args:
