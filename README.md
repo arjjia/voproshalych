@@ -10,17 +10,6 @@
 
 ## Быстрый запуск
 
-### Системные требования
-
-| Параметр | Минимум |
-|----------|---------|
-| CPU | 4 ядра |
-| RAM | 8 GB |
-| Disk | 30 GB |
-| OS | Linux (Docker) |
-| Docker | 24+ |
-| Docker Compose | 2.20+ |
-
 ### Установка
 
 ```bash
@@ -50,6 +39,16 @@ docker compose ps
 | QA Service | `QA_SERVICE_URL`, `DIALOG_CONTEXT_LIMIT_MESSAGES` | Настройки QA-сервиса |
 | LightRAG | `LIGHT_RAG_LLM_MODEL`, `LIGHT_RAG_POSTGRES_URI`, `CHUNK_TOKEN_SIZE` | Параметры RAG-движка |
 | Ollama | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | LLM для индексации графа знаний |
+
+### Системные требования
+
+| Параметр | Минимум |
+|----------|---------|
+| CPU | 4 ядра |
+| RAM | 8 GB |
+| Disk | 30 GB |
+| Docker | 24+ |
+| Docker Compose | 2.20+ |
 
 ## Архитектура
 
