@@ -11,6 +11,7 @@ from fastapi import APIRouter, Header, HTTPException
 from ...config.prompts import (
     DIALOG_CONTEXT_PROMPT,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_NO_CONTEXT,
     SYSTEM_PROMPT_ABOUT_BOT,
     SYSTEM_PROMPT_WITH_CONTEXT,
 )
@@ -298,7 +299,7 @@ async def _handle_kb_question(
             f"generating answer without KB context"
         )
         messages = build_messages(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT_NO_CONTEXT,
             question=original_question,
             search_context=None,
             dialog_context=dialog_context,
