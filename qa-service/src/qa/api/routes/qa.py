@@ -216,7 +216,9 @@ async def ask_question(
         return QAResponse(
             answer=(
                 "Не удалось быстро найти ответ. "
-                "Попробуйте переформулировать или повторить вопрос чуть позже."
+                "Попробуйте переформулировать вопрос — "
+                "используйте простые термины и конкретные формулировки. "
+                "Если не поможет, повторите чуть позже."
             ),
             model="timeout-fallback",
             question_type=1,
@@ -228,7 +230,9 @@ async def ask_question(
         return QAResponse(
             answer=(
                 "Не удалось сформировать ответ. "
-                "Попробуйте переформулировать вопрос или повторить позже."
+                "Попробуйте переформулировать вопрос — "
+                "используйте простые термины и конкретные формулировки. "
+                "Если не поможет, повторите позже."
             ),
             model="error-fallback",
             question_type=1,
@@ -259,7 +263,10 @@ async def _handle_kb_question(
     )
 
     search_data = await asyncio.wait_for(
-        rag.aquery_data(search_query, param=QueryParam(mode="mix")),
+        rag.aquery_data(
+            search_query,
+            param=QueryParam(mode="mix", top_k=20, top_n=10),
+        ),
         timeout=timeouts["lightrag"],
     )
     t2_elapsed = time.time() - t2_start

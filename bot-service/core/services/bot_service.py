@@ -172,6 +172,8 @@ class BotService:
 
         if lowered_text == "/start":
             return self._build_start_response(message, user)
+        if lowered_text == "/help":
+            return self._build_help_response()
         if self._is_service_command(lowered_text):
             return self._build_service_command_response()
 
@@ -304,13 +306,16 @@ class BotService:
             logger.error("QA service timeout")
             return {"answer": (
                 "Не удалось быстро найти ответ. "
-                "Попробуйте переформулировать или повторить вопрос чуть позже."
+                "Попробуйте переформулировать вопрос — "
+                "используйте простые термины и конкретные формулировки. "
+                "Если не поможет, повторите чуть позже."
             )}
         except QAServiceUnavailable:
             logger.error("QA service unavailable")
             return {"answer": (
                 "Сервис временно недоступен. "
-                "Мы уже работаем над устранением проблемы. Попробуйте через пару минут."
+                "Мы уже работаем над устранением проблемы. "
+                "Попробуйте через пару минут."
             )}
         except QAServiceRateLimited:
             logger.error("QA service rate limited")
@@ -322,12 +327,14 @@ class BotService:
             logger.error(f"QA service error: {e}")
             return {"answer": (
                 "Не удалось сформировать ответ. "
-                "Попробуйте переформулировать вопрос."
+                "Попробуйте переформулировать вопрос — "
+                "используйте простые термины и конкретные формулировки."
             )}
         except Exception as e:
             logger.error(f"Unexpected QA error: {e}")
             return {"answer": (
-                "Что-то пошло не так. Попробуйте повторить запрос позже."
+                "Что-то пошло не так. "
+                "Попробуйте повторить запрос позже или переформулировать вопрос."
             )}
 
     def _format_qa_answer(self, qa_result: dict) -> str:
@@ -412,23 +419,52 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=(
-                        "Привет! Я бот-помощник Вопрошалыч.\n\n"
+                        "Привет! 👋🏻 Я бот-помощник Вопрошалыч.\n\n"
                         "Я отвечаю на вопросы об обучении в ТюмГУ — "
-                        "от расписания и стипендий до общежитий и документов.\n\n"
-                        "Источники информации:\n"
-                        "• utmn.ru — официальный сайт ТюмГУ\n"
-                        "• sveden.utmn.ru — сведения об образовательной организации\n"
-                        "• confluence.utmn.ru — внутренняя база знаний\n\n"
+                        "расписание, стипендии, общежития, документы, "
+                        "карты доступа и многое другое.\n\n"
+                        "📖 Полезные ссылки:\n"
+                        "• Инструкции для ИС ТюмГУ — "
+                        "https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500\n"
+                        "• Руководства для обучающихся — "
+                        "https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972\n\n"
                         "Кнопка «Начать новый диалог» сбрасывает историю общения — "
                         "я начну отвечать без учёта предыдущих вопросов.\n\n"
                         "Подписка на поздравления с праздниками доступна "
                         "через кнопку ниже!\n\n"
-                        "Используется искусственный интеллект, поэтому ответы "
-                        "могут содержать неточности. Продолжая работу с ботом, "
+                        "Ответы формируются с помощью искусственного интеллекта "
+                        "и могут содержать неточности. Продолжая работу с ботом, "
                         "вы даёте согласие на обработку персональных данных "
                         "и получение сообщений."
                     ),
                     buttons=self._build_start_buttons(is_subscribed),
+                )
+            ]
+        )
+
+    def _build_help_response(self) -> BotResponse:
+        """Возвращает справочное сообщение с контактами.
+
+        Returns:
+            BotResponse: Ответ для команды `/help`.
+        """
+
+        return BotResponse(
+            actions=[
+                OutgoingAction(
+                    type=ActionType.send_text,
+                    text=(
+                        "📋 Контакты ТюмГУ:\n\n"
+                        "Единый деканат:\n"
+                        "г. Тюмень, ул. Ленина, 16\n"
+                        "Тел.: 8 (3452) 59-74-29\n"
+                        "Email: ed@utmn.ru\n\n"
+                        "Приёмная комиссия:\n"
+                        "Тел.: 8-800-700-05-53\n"
+                        "Email: 597759@utmn.ru\n\n"
+                        "Также вы можете задать вопрос прямо здесь — "
+                        "я отвечу на основе базы знаний ТюмГУ."
+                    ),
                 )
             ]
         )
