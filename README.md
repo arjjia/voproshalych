@@ -10,6 +10,19 @@
 
 ## Быстрый запуск
 
+### Системные требования
+
+| Параметр | Минимум |
+|----------|---------|
+| CPU | 4 ядра |
+| RAM | 8 GB |
+| Disk | 30 GB |
+| OS | Linux (Docker) |
+| Docker | 24+ |
+| Docker Compose | 2.20+ |
+
+### Установка
+
 ```bash
 # 1. Скопировать переменные окружения
 cp .env.example .env
@@ -24,6 +37,19 @@ docker compose up -d --build postgres db-migrate qa-service bot-core telegram-bo
 # 3. Проверить состояние
 docker compose ps
 ```
+
+### Переменные окружения
+
+Полный список переменных — в [.env.example](.env.example). Основные группы:
+
+| Группа | Переменные | Описание |
+|--------|-----------|----------|
+| Bot Core | `BOT_CORE_URL`, `TELEGRAM_BOT_TOKEN`, `VK_BOT_TOKEN`, `MAX_BOT_TOKEN` | URL бизнес-логики и токены мессенджеров |
+| Database | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST` | Подключение к PostgreSQL |
+| LLM Providers | `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `GIGACHAT_CLIENT_ID` | API-ключи LLM-провайдеров |
+| QA Service | `QA_SERVICE_URL`, `DIALOG_CONTEXT_LIMIT_MESSAGES` | Настройки QA-сервиса |
+| LightRAG | `LIGHT_RAG_LLM_MODEL`, `LIGHT_RAG_POSTGRES_URI`, `CHUNK_TOKEN_SIZE` | Параметры RAG-движка |
+| Ollama | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | LLM для индексации графа знаний |
 
 ## Архитектура
 

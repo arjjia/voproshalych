@@ -1,0 +1,61 @@
+stages:
+  - build
+  - test
+  - deploy
+  - prune
+
+build:
+  stage: build
+  script:
+    - docker build --network host -t voproshalych/postgres:latest ./db/postgres
+    - docker build --network host -t voproshalych/db-migrate:latest ./db
+    - docker build --network host -t voproshalych/qa:latest ./qa-service
+    - docker build --network host -t voproshalych/bot-core:latest ./bot-service/core
+    - docker build --network host -t voproshalych/telegram-bot:latest ./bot-service/bots/telegram
+    - docker build --network host -t voproshalych/vk-bot:latest ./bot-service/bots/vk
+    - docker build --network host -t voproshalych/max-bot:latest ./bot-service/bots/max
+    - docker build --network host -t voproshalych/admin-service:latest ./admin-service
+    - docker build --network host -t voproshalych/admin-ui:latest ./admin-ui
+  only:
+    - main
+  tags:
+    - srv-voproshalych01
+
+test:
+  stage: test
+  before_script:
+    - cp $ENV_PRODUCTION .env
+  script:
+    - docker run --rm voproshalych/qa:latest pytest tests/ -v
+    - docker run --rm voproshalych/bot-core:latest pytest core/tests/ -v
+  only:
+    - main
+  tags:
+    - srv-voproshalych01
+
+deploy:
+  stage: deploy
+  environment: production
+  before_script:
+    - cp $ENV_PRODUCTION .env
+  script:
+    - docker compose --env-file .env up -d
+    - docker compose logs -t db-migrate
+  only:
+    - main
+  tags:
+    - srv-voproshalych01
+
+prune:
+  stage: prune
+  script:
+    - docker container prune -f
+    - docker image prune -af
+    - docker network prune -f
+    - docker builder prune --filter unused-for=30m -f
+    - docker system df
+    - df -h
+  only:
+    - main
+  tags:
+    - srv-voproshalych01

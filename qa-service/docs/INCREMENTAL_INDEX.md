@@ -35,10 +35,6 @@ docker compose exec qa-service uv run python scripts/fill_kb_unified.py --no-gra
 | 1 | Условия по использованию услуг Wi-Fi | `https://confluence.utmn.ru/download/attachments/8037875/terms.4be25f01.pdf?version=1&modificationDate=1615881981974&api=v2` |
 | 2 | Положение о порядке использования сети Интернет | `https://confluence.utmn.ru/download/attachments/8037875/247_1.pdf?version=1&modificationDate=1621592539032&api=v2` |
 
-### Confluence Study
-
-
-
 ### Sveden (35 PDF)
 
 #### Устав и изменения (8)
