@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"syscall"
 	"time"
@@ -52,10 +53,12 @@ type CallbackEvent struct {
 
 // OutgoingAction описывает действие, которое должен выполнить адаптер.
 type OutgoingAction struct {
-	Type     string           `json:"type"`
-	Text     string           `json:"text,omitempty"`
-	Buttons  [][]InlineButton `json:"buttons,omitempty"`
-	Metadata map[string]any   `json:"metadata,omitempty"`
+	Type          string                `json:"type"`
+	Text          string                `json:"text,omitempty"`
+	ParseMode     string                `json:"parse_mode,omitempty"`
+	Buttons       [][]InlineButton      `json:"buttons,omitempty"`
+	ReplyKeyboard [][]ReplyKeyboardButton `json:"reply_keyboard,omitempty"`
+	Metadata      map[string]any        `json:"metadata,omitempty"`
 }
 
 // BotResponse описывает ответ core-сервиса.
@@ -67,6 +70,11 @@ type BotResponse struct {
 type InlineButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data"`
+}
+
+// ReplyKeyboardButton описывает кнопку reply-клавиатуры.
+type ReplyKeyboardButton struct {
+	Text string `json:"text"`
 }
 
 // InternalSendRequest описывает внутренний запрос на отправку сообщения через MAX-адаптер.
@@ -261,6 +269,11 @@ func handleUpdate(
 			continue
 		}
 
+		text := action.Text
+		if action.ParseMode == "HTML" {
+			text = stripHTMLToPlain(text)
+		}
+
 		var chatID int64
 		var userID int64
 		switch {
@@ -272,7 +285,12 @@ func handleUpdate(
 			return fmt.Errorf("в MAX update нет chat_id и user_id для ответа")
 		}
 
-		if err := sendMessage(ctx, api, userID, chatID, action.Text, action.Buttons); err != nil {
+		buttons := action.Buttons
+		if len(buttons) == 0 && len(action.ReplyKeyboard) > 0 {
+			buttons = convertReplyToInline(action.ReplyKeyboard)
+		}
+
+		if err := sendMessage(ctx, api, userID, chatID, text, buttons); err != nil {
 			return fmt.Errorf("не удалось отправить ответ в MAX: %w", err)
 		}
 	}
@@ -310,7 +328,12 @@ func handleCallbackUpdate(
 			continue
 		}
 
-		if err := sendMessage(ctx, api, userID, chatID, action.Text, action.Buttons); err != nil {
+		text := action.Text
+		if action.ParseMode == "HTML" {
+			text = stripHTMLToPlain(text)
+		}
+
+		if err := sendMessage(ctx, api, userID, chatID, text, action.Buttons); err != nil {
 			return fmt.Errorf("не удалось отправить callback ответ в MAX: %w", err)
 		}
 	}
@@ -646,4 +669,38 @@ func detectButtonIntent(callbackData string) schemes.Intent {
 	default:
 		return schemes.DEFAULT
 	}
+}
+
+// stripHTMLToPlain преобразует HTML-разметку в обычный текст.
+func stripHTMLToPlain(text string) string {
+	linkRegex := regexp.MustCompile(`<a href="([^"]+)">([^<]+)</a>`)
+	text = linkRegex.ReplaceAllString(text, "$2 ($1)")
+	return text
+}
+
+// convertReplyToInline преобразует reply-кнопки в inline-кнопки
+// с корректными callback_data для обработки в core.
+func convertReplyToInline(rows [][]ReplyKeyboardButton) [][]InlineButton {
+	buttonMapping := map[string]string{
+		"📋 Справка":    "menu:help",
+		"🔄 Новый диалог": "menu:new_dialog",
+		"🔔 Рассылка":    "menu:subscription",
+	}
+
+	var result [][]InlineButton
+	for _, row := range rows {
+		var buttonRow []InlineButton
+		for _, btn := range row {
+			callbackData := btn.Text
+			if mapped, ok := buttonMapping[btn.Text]; ok {
+				callbackData = mapped
+			}
+			buttonRow = append(buttonRow, InlineButton{
+				Text:         btn.Text,
+				CallbackData: callbackData,
+			})
+		}
+		result = append(result, buttonRow)
+	}
+	return result
 }

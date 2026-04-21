@@ -61,7 +61,7 @@ class BotService:
             BotResponse: Ответ для callback-события.
         """
 
-        if event.callback_data == "subscription:toggle":
+        if event.callback_data == "subscription:toggle" or event.callback_data == "menu:subscription":
             user = self._user_service.toggle_subscription(event)
             if user is None:
                 return BotResponse(
@@ -87,7 +87,10 @@ class BotService:
                 ]
             )
 
-        if event.callback_data == "dialog:start_new":
+        if event.callback_data == "menu:help":
+            return self._build_help_response()
+
+        if event.callback_data == "dialog:start_new" or event.callback_data == "menu:new_dialog":
             user = self._user_service.get_user(event.platform.value, event.user_id)
             if user is None:
                 return BotResponse(
