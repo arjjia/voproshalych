@@ -485,18 +485,17 @@ class BotService:
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
+                    parse_mode="HTML",
                     text=(
                         "Привет! 👋🏻 Я бот-помощник Вопрошалыч.\n\n"
                         "Я отвечаю на вопросы об обучении в ТюмГУ — "
                         "расписание, стипендии, общежития, документы, "
                         "карты доступа и многое другое.\n\n"
                         "Источники информации:\n"
-                        "• utmn.ru — официальный сайт ТюмГУ\n"
-                        "• sveden.utmn.ru — сведения об образовательной организации\n"
-                        "• Инструкции для ИС ТюмГУ — "
-                        "https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500\n"
-                        "• Руководства для обучающихся — "
-                        "https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972\n\n"
+                        "• <a href=\"https://utmn.ru\">Официальный сайт ТюмГУ</a>\n"
+                        "• <a href=\"https://sveden.utmn.ru\">Сведения об образовательной организации</a>\n"
+                        "• <a href=\"https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500\">Инструкции для ИС ТюмГУ</a>\n"
+                        "• <a href=\"https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972\">Руководства для обучающихся</a>\n\n"
                         "Кнопка «Начать новый диалог» сбрасывает историю общения — "
                         "я начну отвечать без учёта предыдущих вопросов.\n\n"
                         "Подписка на поздравления с праздниками доступна "

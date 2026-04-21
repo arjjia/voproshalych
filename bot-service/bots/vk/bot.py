@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import re
 from vkbottle import Callback, GroupEventType, GroupTypes, Keyboard
 from vkbottle.bot import Bot, Message
 
@@ -154,6 +155,8 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
         for action in bot_response.get("actions", []):
             if action.get("type") == "send_text" and action.get("text"):
                 text = action["text"]
+                if action.get("parse_mode") == "HTML":
+                    text = _strip_html_to_plain(text)
                 keyboard = build_inline_keyboard(action.get("buttons", []))
                 reply_keyboard = build_reply_keyboard(
                     action.get("reply_keyboard", [])
@@ -245,6 +248,16 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
             logging.exception("Не удалось подтвердить callback VK через snackbar")
 
     return bot
+
+
+def _strip_html_to_plain(text: str) -> str:
+    """Преобразует HTML-разметку в обычный текст для VK.
+
+    VK не поддерживает HTML в сообщениях, поэтому
+    <a href="url">текст</a> → текст (url)
+    """
+    text = re.sub(r'<a href="([^"]+)">([^<]+)</a>', r'\2 (\1)', text)
+    return text
 
 
 def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:

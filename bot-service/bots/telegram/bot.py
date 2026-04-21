@@ -17,6 +17,7 @@ import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.enums import ParseMode
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -210,6 +211,9 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
         for action in bot_response.get("actions", []):
             if action.get("type") == "send_text" and action.get("text"):
                 text = action["text"]
+                parse_mode = (
+                    ParseMode.HTML if action.get("parse_mode") == "HTML" else None
+                )
                 keyboard = build_inline_keyboard(action.get("buttons", []))
                 reply_keyboard = build_reply_keyboard(
                     action.get("reply_keyboard", [])
@@ -217,6 +221,7 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
                 try:
                     await message.answer(
                         text,
+                        parse_mode=parse_mode,
                         reply_markup=reply_keyboard or keyboard,
                     )
                 except TelegramBadRequest as exc:
@@ -225,6 +230,7 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
                         try:
                             await message.answer(
                                 truncated,
+                                parse_mode=parse_mode,
                                 reply_markup=reply_keyboard or keyboard,
                             )
                         except TelegramBadRequest:

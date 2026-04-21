@@ -48,6 +48,10 @@ class OutgoingAction(BaseModel):
         default=None,
         description="Текстовая нагрузка для текстовых действий",
     )
+    parse_mode: str | None = Field(
+        default=None,
+        description="Форматирование текста: HTML или None (обычный текст)",
+    )
     buttons: list[list[InlineButton]] = Field(
         default_factory=list,
         description="Inline-кнопки для платформенных адаптеров",
