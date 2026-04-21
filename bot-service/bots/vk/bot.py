@@ -130,21 +130,24 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 
     bot = Bot(settings.vk_bot_token)
 
-    @bot.on.message(text=["/start", "START", "Начать", "начать"])
-    async def handle_start(message: Message) -> None:
-        """Обрабатывает команду /start и сообщение 'Начать'.
+    @bot.on.message()
+    async def handle_start_or_message(message: Message) -> None:
+        """Обрабатывает /start, 'Начать' или обычное сообщение.
 
         Args:
-            message: Сообщение VK с /start или 'Начать'.
+            message: Сообщение VK.
         """
+        text = (message.text or "").strip().lower()
+        is_start = text in {"/start", "start", "начать"}
+
         pending_message_id: int | None = None
-        if should_show_pending_message(message):
+        if should_show_pending_message(message) or is_start:
             pending_message_id = await send_pending_message(bot, message)
 
         try:
             bot_response = await core_client.process_message(message)
         except httpx.HTTPError:
-            logging.exception("Не удалось обработать /start VK через core")
+            logging.exception("Не удалось обработать сообщение VK через core")
             await delete_pending_message(bot, pending_message_id)
             await message.answer("Сервис временно недоступен.")
             return
@@ -166,10 +169,10 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
                         keyboard=reply_keyboard or keyboard,
                     )
                 except Exception:
-                    logging.exception("Failed to send VK /start message")
+                    logging.exception("Failed to send VK message")
 
-    @bot.on.message()
-    async def handle_message(message: Message) -> None:
+    @bot.on.raw_event(GroupEventType.MESSAGE_EVENT, dataclass=GroupTypes.MessageEvent)
+    async def handle_callback(event: GroupTypes.MessageEvent) -> None:
         """Проксирует сообщения в core-сервис и выполняет действия.
 
         Args:
