@@ -262,9 +262,9 @@ def _strip_html_to_plain(text: str) -> str:
     """Преобразует HTML-разметку в обычный текст для VK.
 
     VK не поддерживает HTML в сообщениях, поэтому
-    <a href="url">текст</a> → текст (url)
+    <a href="url">текст</a> → текст\n— url
     """
-    text = re.sub(r'<a href="([^"]+)">([^<]+)</a>', r'\2 (\1)', text)
+    text = re.sub(r'<a href="([^"]+)">([^<]+)</a>', r"\2\n— \1", text)
     return text
 
 
