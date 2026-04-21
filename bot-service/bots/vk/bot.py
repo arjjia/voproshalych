@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 import re
-from vkbottle import Callback, GroupEventType, GroupTypes, Keyboard
+from vkbottle import Callback, GroupEventType, GroupTypes, Keyboard, Text
 from vkbottle.bot import Bot, Message
 
 
@@ -307,13 +307,12 @@ def build_reply_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:
     if not button_rows:
         return None
 
-    keyboard = Keyboard(inline=False, one_time=False)
+    keyboard = Keyboard(one_time=False)
     for row_index, row in enumerate(button_rows):
         if row_index > 0:
             keyboard.row()
-
         for button in row:
-            keyboard.add(KeyboardButton(text=button["text"]))
+            keyboard.add(Text(button["text"]))
 
     return keyboard.get_json()
 
