@@ -23,6 +23,16 @@ class InlineButton(BaseModel):
     callback_data: str = Field(..., description="Данные callback-события")
 
 
+class KeyboardButton(BaseModel):
+    """Кнопка reply-клавиатуры (отправляет текстовое сообщение).
+
+    Attributes:
+        text: Текст на кнопке (он же отправляется как сообщение).
+    """
+
+    text: str = Field(..., description="Текст кнопки")
+
+
 class OutgoingAction(BaseModel):
     """Действие, которое должен выполнить адаптер платформы.
 
@@ -30,6 +40,7 @@ class OutgoingAction(BaseModel):
         type: Тип действия, понятный платформенным адаптерам.
         text: Текстовая нагрузка для текстовых действий.
         buttons: Inline-кнопки для отображения под сообщением.
+        reply_keyboard: Постоянная клавиатура под полем ввода.
     """
 
     type: ActionType
@@ -40,6 +51,10 @@ class OutgoingAction(BaseModel):
     buttons: list[list[InlineButton]] = Field(
         default_factory=list,
         description="Inline-кнопки для платформенных адаптеров",
+    )
+    reply_keyboard: list[list[KeyboardButton]] = Field(
+        default_factory=list,
+        description="Постоянная reply-клавиатура под полем ввода",
     )
 
 

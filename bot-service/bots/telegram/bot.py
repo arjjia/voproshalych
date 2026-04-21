@@ -21,7 +21,9 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton as TgKeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
 )
 
 
@@ -209,18 +211,27 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
             if action.get("type") == "send_text" and action.get("text"):
                 text = action["text"]
                 keyboard = build_inline_keyboard(action.get("buttons", []))
+                reply_keyboard = build_reply_keyboard(
+                    action.get("reply_keyboard", [])
+                )
                 try:
-                    await message.answer(text, reply_markup=keyboard)
+                    await message.answer(
+                        text,
+                        reply_markup=reply_keyboard or keyboard,
+                    )
                 except TelegramBadRequest as exc:
                     if "too long" in str(exc).lower() and len(text) > 4000:
                         truncated = text[:3950] + "\n\n..."
                         try:
-                            await message.answer(truncated, reply_markup=keyboard)
+                            await message.answer(
+                                truncated,
+                                reply_markup=reply_keyboard or keyboard,
+                            )
                         except TelegramBadRequest:
                             await message.answer(
                                 "Ответ слишком длинный. "
                                 "Попробуйте переформулировать вопрос.",
-                                reply_markup=keyboard,
+                                reply_markup=reply_keyboard,
                             )
                     else:
                         logging.error(f"Telegram bad request: {exc}")
@@ -302,6 +313,33 @@ def build_inline_keyboard(
         )
 
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
+def build_reply_keyboard(
+    button_rows: list[list[dict[str, str]]],
+) -> ReplyKeyboardMarkup | None:
+    """Преобразует кнопки из ответа core в Telegram reply keyboard.
+
+    Args:
+        button_rows: Строки кнопок из ответа core.
+
+    Returns:
+        ReplyKeyboardMarkup | None: Готовая клавиатура или `None`.
+    """
+
+    if not button_rows:
+        return None
+
+    keyboard = []
+    for row in button_rows:
+        keyboard.append(
+            [TgKeyboardButton(text=button["text"]) for button in row]
+        )
+
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+    )
 
 
 def detect_message_type(message: Message) -> str:

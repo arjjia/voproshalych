@@ -6,7 +6,7 @@ import re
 from config import settings
 from models.callback import CallbackEvent
 from models.message import IncomingMessage
-from models.response import ActionType, BotResponse, InlineButton, OutgoingAction
+from models.response import ActionType, BotResponse, InlineButton, KeyboardButton, OutgoingAction
 from services.dialog_service import DialogService
 from services.feedback_service import FeedbackService, FEEDBACK_LIKE, FEEDBACK_DISLIKE
 from services.holiday_newsletter import HolidayNewsletterService
@@ -198,8 +198,49 @@ class BotService:
 
         if lowered_text == "/start":
             return self._build_start_response(message, user)
-        if lowered_text == "/help":
+        if lowered_text in ("/help", "📋 справка"):
             return self._build_help_response()
+        if lowered_text in ("🔄 новый диалог",):
+            if user is not None:
+                self._dialog_service.start_new_dialog(user.id)
+            return BotResponse(
+                actions=[
+                    OutgoingAction(
+                        type=ActionType.send_text,
+                        text="История сброшена! Задавайте новый вопрос 🔄",
+                    )
+                ]
+            )
+        if lowered_text in ("🔔 рассылка",):
+            from models.callback import CallbackEvent as CBEvent
+            fake_event = CBEvent(
+                platform=message.platform,
+                user_id=message.user_id,
+                chat_id=message.chat_id,
+                callback_data="subscription:toggle",
+            )
+            toggled_user = self._user_service.toggle_subscription(fake_event)
+            if toggled_user is not None:
+                return BotResponse(
+                    actions=[
+                        OutgoingAction(
+                            type=ActionType.send_text,
+                            text=(
+                                "Вы подписались на поздравления с праздниками!"
+                                if toggled_user.is_subscribed
+                                else "Вы отписались от поздравлений."
+                            ),
+                        )
+                    ]
+                )
+            return BotResponse(
+                actions=[
+                    OutgoingAction(
+                        type=ActionType.send_text,
+                        text="Не удалось изменить статус подписки.",
+                    )
+                ]
+            )
         if self._is_service_command(lowered_text):
             return self._build_service_command_response()
 
@@ -466,6 +507,7 @@ class BotService:
                         "и получение сообщений."
                     ),
                     buttons=self._build_start_buttons(is_subscribed),
+                    reply_keyboard=self._build_main_keyboard(),
                 )
             ]
         )
@@ -482,7 +524,7 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=(
-                        "📋 Контакты ТюмГУ:\n\n"
+                        "📋 Контакты:\n\n"
                         "Единый деканат:\n"
                         "г. Тюмень, ул. Ленина, 16\n"
                         "Тел.: 8 (3452) 59-74-29\n"
@@ -490,6 +532,8 @@ class BotService:
                         "Приёмная комиссия:\n"
                         "Тел.: 8-800-700-05-53\n"
                         "Email: 597759@utmn.ru\n\n"
+                        "Техподдержка Вопрошалыча:\n"
+                        "Email: stud0000122686@utmn.ru\n\n"
                         "Также вы можете задать вопрос прямо здесь — "
                         "я отвечу на основе базы знаний ТюмГУ."
                     ),
@@ -498,7 +542,7 @@ class BotService:
         )
 
     def _build_start_buttons(self, is_subscribed: bool) -> list[list[InlineButton]]:
-        """Возвращает кнопки стартового сообщения.
+        """Возвращает inline-кнопки стартового сообщения.
 
         Args:
             is_subscribed: Текущий статус подписки.
@@ -524,6 +568,21 @@ class BotService:
                     callback_data="subscription:toggle",
                 )
             ],
+        ]
+
+    def _build_main_keyboard(self) -> list[list[KeyboardButton]]:
+        """Возвращает постоянную reply-клавиатуру под полем ввода.
+
+        Returns:
+            list[list[KeyboardButton]]: Кнопки для быстрого доступа.
+        """
+
+        return [
+            [
+                KeyboardButton(text="📋 Справка"),
+                KeyboardButton(text="🔄 Новый диалог"),
+                KeyboardButton(text="🔔 Рассылка"),
+            ]
         ]
 
     def _build_feedback_buttons(self) -> list[list[InlineButton]]:

@@ -155,12 +155,21 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
             if action.get("type") == "send_text" and action.get("text"):
                 text = action["text"]
                 keyboard = build_inline_keyboard(action.get("buttons", []))
+                reply_keyboard = build_reply_keyboard(
+                    action.get("reply_keyboard", [])
+                )
                 try:
-                    await message.answer(text, keyboard=keyboard)
+                    await message.answer(
+                        text,
+                        keyboard=reply_keyboard or keyboard,
+                    )
                 except Exception:
                     logging.exception("Failed to send VK message")
                     if len(text) > 4000:
-                        await message.answer(text[:3950] + "\n\n...", keyboard=keyboard)
+                        await message.answer(
+                            text[:3950] + "\n\n...",
+                            keyboard=reply_keyboard or keyboard,
+                        )
                     else:
                         await message.answer("Не удалось отправить ответ.")
 
@@ -260,6 +269,32 @@ def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None
             keyboard.add(
                 Callback(button["text"], payload={"command": button["callback_data"]})
             )
+
+    return keyboard.get_json()
+
+
+def build_reply_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:
+    """Преобразует кнопки из ответа core в VK reply keyboard.
+
+    Args:
+        button_rows: Строки кнопок из ответа core.
+
+    Returns:
+        str | None: JSON-представление клавиатуры или `None`.
+    """
+
+    if not button_rows:
+        return None
+
+    from vkbottle import KeyboardButton, Text
+
+    keyboard = Keyboard(inline=False)
+    for row_index, row in enumerate(button_rows):
+        if row_index > 0:
+            keyboard.row()
+
+        for button in row:
+            keyboard.add(KeyboardButton(Text(button["text"])))
 
     return keyboard.get_json()
 
