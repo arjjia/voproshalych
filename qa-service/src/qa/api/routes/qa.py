@@ -270,7 +270,7 @@ async def _handle_kb_question(
         search_data = await asyncio.wait_for(
             rag.aquery_data(
                 search_query,
-                param=QueryParam(mode="mix", top_k=20, top_n=10),
+                param=QueryParam(mode="mix", top_k=20),
             ),
             timeout=timeouts["lightrag"],
         )

@@ -58,7 +58,6 @@ class LLMConfig(BaseSettings):
     openrouter_models: list[str] = Field(
         default=[
             "nvidia/nemotron-3-super-120b-a12b:free",
-            "qwen/qwen3.6-plus:free",
         ]
     )
     openrouter_fallback_model: str = Field(default="openrouter/free")
