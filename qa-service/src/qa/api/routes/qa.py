@@ -256,30 +256,41 @@ async def _handle_kb_question(
     t2_start = time.time()
     rag = get_lightrag()
 
-    logger.info(
-        f"[{req_id}] Phase 2a START: aquery_data(mode=mix)\n"
-        f"[{req_id}]   search_query: '{search_query[:120]}'"
-    )
+    search_context = ""
+    sources: list[str] = []
+    keywords: dict = {"high_level": [], "low_level": []}
 
-    search_data = await asyncio.wait_for(
-        rag.aquery_data(
-            search_query,
-            param=QueryParam(mode="mix", top_k=20, top_n=10),
-        ),
-        timeout=timeouts["lightrag"],
-    )
-    t2_elapsed = time.time() - t2_start
+    try:
+        logger.info(
+            f"[{req_id}] Phase 2a START: aquery_data(mode=mix)\n"
+            f"[{req_id}]   search_query: '{search_query[:120]}'"
+        )
 
-    search_context = _format_search_context(search_data)
-    sources = _extract_sources_from_data(search_data)
-    keywords = _extract_keywords_from_data(search_data)
+        search_data = await asyncio.wait_for(
+            rag.aquery_data(
+                search_query,
+                param=QueryParam(mode="mix", top_k=20, top_n=10),
+            ),
+            timeout=timeouts["lightrag"],
+        )
+        t2_elapsed = time.time() - t2_start
 
-    logger.info(
-        f"[{req_id}] Phase 2a DONE: search — {t2_elapsed:.1f}s\n"
-        f"[{req_id}]   context_len={len(search_context)}, "
-        f"sources={len(sources)}, "
-        f"keywords_HL={keywords.get('high_level', [])[:5]}"
-    )
+        search_context = _format_search_context(search_data)
+        sources = _extract_sources_from_data(search_data)
+        keywords = _extract_keywords_from_data(search_data)
+
+        logger.info(
+            f"[{req_id}] Phase 2a DONE: search — {t2_elapsed:.1f}s\n"
+            f"[{req_id}]   context_len={len(search_context)}, "
+            f"sources={len(sources)}, "
+            f"keywords_HL={keywords.get('high_level', [])[:5]}"
+        )
+    except (asyncio.TimeoutError, Exception) as search_err:
+        t2_elapsed = time.time() - t2_start
+        logger.warning(
+            f"[{req_id}] Phase 2a FAILED: {search_err} — {t2_elapsed:.1f}s, "
+            f"falling back to LLM without KB context"
+        )
 
     if not search_context.strip():
         logger.info(
