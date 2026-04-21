@@ -8,6 +8,7 @@ from models.callback import CallbackEvent
 from models.message import IncomingMessage
 from models.response import ActionType, BotResponse, InlineButton, OutgoingAction
 from services.dialog_service import DialogService
+from services.feedback_service import FeedbackService, FEEDBACK_LIKE, FEEDBACK_DISLIKE
 from services.holiday_newsletter import HolidayNewsletterService
 from services.qa_service_client import QAServiceClient
 from services.user_service import UserService
@@ -26,6 +27,7 @@ class BotService:
             timeout_seconds=settings.qa_service_timeout_seconds,
         )
         self._dialog_service = DialogService()
+        self._feedback_service = FeedbackService()
         self._holiday_newsletter_service = HolidayNewsletterService(
             qa_service_client=self._qa_service_client
         )
@@ -118,6 +120,18 @@ class BotService:
             )
 
         if event.callback_data == "feedback:like":
+            result = self._feedback_service.save_feedback(
+                event.platform.value, event.user_id, FEEDBACK_LIKE,
+            )
+            if result == "already_rated":
+                return BotResponse(
+                    actions=[
+                        OutgoingAction(
+                            type=ActionType.send_text,
+                            text="Вы уже оценили этот ответ.",
+                        )
+                    ]
+                )
             return BotResponse(
                 actions=[
                     OutgoingAction(
@@ -128,6 +142,18 @@ class BotService:
             )
 
         if event.callback_data == "feedback:dislike":
+            result = self._feedback_service.save_feedback(
+                event.platform.value, event.user_id, FEEDBACK_DISLIKE,
+            )
+            if result == "already_rated":
+                return BotResponse(
+                    actions=[
+                        OutgoingAction(
+                            type=ActionType.send_text,
+                            text="Вы уже оценили этот ответ.",
+                        )
+                    ]
+                )
             return BotResponse(
                 actions=[
                     OutgoingAction(
@@ -423,7 +449,9 @@ class BotService:
                         "Я отвечаю на вопросы об обучении в ТюмГУ — "
                         "расписание, стипендии, общежития, документы, "
                         "карты доступа и многое другое.\n\n"
-                        "📖 Полезные ссылки:\n"
+                        "Источники информации:\n"
+                        "• utmn.ru — официальный сайт ТюмГУ\n"
+                        "• sveden.utmn.ru — сведения об образовательной организации\n"
                         "• Инструкции для ИС ТюмГУ — "
                         "https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500\n"
                         "• Руководства для обучающихся — "
