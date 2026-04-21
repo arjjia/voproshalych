@@ -38,8 +38,8 @@ def _get_timeout_for_model(model: str, config) -> float:
 
 async def _retry_with_backoff(
     func,
-    max_retries: int = 3,
-    backoff_factor: float = 1.0,
+    max_retries: int = 1,
+    backoff_factor: float = 0.5,
 ):
     """Выполнить запрос с retry и экспоненциальным backoff.
 
@@ -217,7 +217,15 @@ class OpenRouterProvider(BaseLLMProvider):
             "max_tokens": max_tokens,
         }
 
-        backoff_factor = 1.0 if "qwen" not in model.lower() else 2.0
+        total_chars = sum(len(m.get("content", "")) for m in api_messages)
+        logger.info(
+            f"OpenRouter request: model={model}, "
+            f"messages={len(api_messages)}, "
+            f"total_chars={total_chars}, "
+            f"est_tokens~{total_chars // 4}"
+        )
+
+        backoff_factor = 0.5
 
         async def _make_request():
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -242,7 +250,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     },
                 )
 
-        return await _retry_with_backoff(_make_request, max_retries=3, backoff_factor=backoff_factor)
+        return await _retry_with_backoff(_make_request, max_retries=1, backoff_factor=backoff_factor)
 
     async def generate(
         self,
