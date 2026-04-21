@@ -139,9 +139,10 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
         """
         text = (message.text or "").strip().lower()
         is_start = text in {"/start", "start", "начать"}
+        is_quick_button = text in {"помощь", "новый диалог", "рассылка", "📋 помощь", "🔄 новый диалог", "🔔 рассылка"}
 
         pending_message_id: int | None = None
-        if should_show_pending_message(message):
+        if should_show_pending_message(message) and not is_start and not is_quick_button:
             pending_message_id = await send_pending_message(bot, message)
 
         try:
