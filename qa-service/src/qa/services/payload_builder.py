@@ -4,7 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MAX_PROMPT_TOKENS = 7000
+MAX_PROMPT_TOKENS = 2000
 CHARS_PER_TOKEN = 4
 
 

@@ -36,9 +36,11 @@ router = APIRouter(prefix="/qa", tags=["qa"])
 
 def _get_timeouts() -> dict:
     config = get_llm_config()
+    total_timeout = getattr(config, "answer_generation_timeout", 60) or 60
     return {
-        "lightrag": getattr(config, "answer_generation_timeout", 120) or 120,
-        "generation": getattr(config, "answer_generation_timeout", 120) or 120,
+        "total": total_timeout,
+        "lightrag": total_timeout - 10,
+        "generation": total_timeout,
     }
 
 
@@ -218,55 +220,54 @@ async def ask_question(
         raise HTTPException(status_code=503, detail="LightRAG not initialized")
 
     try:
-        # ── Phase 1: Classify + Expand ──
-        classification = await classify_and_expand(
-            request.question, request_id=req_id
-        )
-        question_type = classification.question_type
-        search_query = classification.expanded_query or request.question
-
-        if len(search_query) > 1500:
-            search_query = search_query[:1500]
-
-        t1_elapsed = time.time() - start_time
-        logger.info(
-            f"[{req_id}] Phase 1 DONE: classify_and_expand — {t1_elapsed:.1f}s\n"
-            f"[{req_id}]   type={question_type}, "
-            f"search_query='{search_query[:120]}'"
-        )
-
-        llm_pool = get_llm_pool()
-        config = get_llm_config()
-
-        # ── Branch by question type ──
-        if question_type == QUESTION_TYPE_KB:
-            result = await _handle_kb_question(
-                req_id, search_query, request.question,
-                request.context, llm_pool, config, timeouts, start_time,
+        async with asyncio.timeout(timeouts["total"]):
+            classification = await classify_and_expand(
+                request.question, request_id=req_id
             )
-        elif question_type == QUESTION_TYPE_SYSTEM:
-            result = await _handle_system_question(
-                req_id, request.question, llm_pool, config, timeouts, start_time,
-            )
-        else:
-            result = await _handle_general_question(
-                req_id, request.question, llm_pool, config, timeouts, start_time,
+            question_type = classification.question_type
+            search_query = classification.expanded_query or request.question
+
+            if len(search_query) > 1500:
+                search_query = search_query[:1500]
+
+            t1_elapsed = time.time() - start_time
+            logger.info(
+                f"[{req_id}] Phase 1 DONE: classify_and_expand — {t1_elapsed:.1f}s\n"
+                f"[{req_id}]   type={question_type}, "
+                f"search_query='{search_query[:120]}'"
             )
 
-        result.expanded_query = classification.expanded_query
-        result.question_type = question_type
+            llm_pool = get_llm_pool()
+            config = get_llm_config()
 
-        total_elapsed = time.time() - start_time
-        logger.info(
-            f"[{req_id}] {'=' * 60}\n"
-            f"[{req_id}] COMPLETE — {total_elapsed:.1f}s, "
-            f"type={question_type}, "
-            f"answer_len={len(result.answer)}, "
-            f"sources={len(result.sources)}\n"
-            f"[{req_id}] {'=' * 60}"
-        )
+            if question_type == QUESTION_TYPE_KB:
+                result = await _handle_kb_question(
+                    req_id, search_query, request.question,
+                    request.context, llm_pool, config, timeouts, start_time,
+                )
+            elif question_type == QUESTION_TYPE_SYSTEM:
+                result = await _handle_system_question(
+                    req_id, request.question, llm_pool, config, timeouts, start_time,
+                )
+            else:
+                result = await _handle_general_question(
+                    req_id, request.question, llm_pool, config, timeouts, start_time,
+                )
 
-        return result
+            result.expanded_query = classification.expanded_query
+            result.question_type = question_type
+
+            total_elapsed = time.time() - start_time
+            logger.info(
+                f"[{req_id}] {'=' * 60}\n"
+                f"[{req_id}] COMPLETE — {total_elapsed:.1f}s, "
+                f"type={question_type}, "
+                f"answer_len={len(result.answer)}, "
+                f"sources={len(result.sources)}\n"
+                f"[{req_id}] {'=' * 60}"
+            )
+
+            return result
 
     except asyncio.TimeoutError:
         total_elapsed = time.time() - start_time
@@ -328,7 +329,7 @@ async def _handle_kb_question(
         search_data = await asyncio.wait_for(
             rag.aquery_data(
                 search_query,
-                param=QueryParam(mode="mix", top_k=20),
+                param=QueryParam(mode="mix", top_k=8),
             ),
             timeout=timeouts["lightrag"],
         )

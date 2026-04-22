@@ -63,9 +63,6 @@ async def init_lightrag():
 
         storage_type = config.get("storage_type", "PostgreSQL")
 
-        # Determine graph storage based on available extensions
-        # PGGraphStorage requires Apache AGE extension (dawsonlp/postgres-batteries-inc)
-        # NetworkXStorage is fallback when AGE is not available
         use_pg_graph = config.get("use_pg_graph", True)
         chunk_token_size = config.get("chunk_token_size", 500)
         chunk_overlap_token_size = config.get("chunk_overlap_token_size", 50)
