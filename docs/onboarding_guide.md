@@ -171,3 +171,58 @@ docker compose exec -T postgres pg_dump \
 ```
 
 Экспорт можно делать **без остановки сервисов** — PostgreSQL MVCC гарантирует согласованность дампа.
+
+## Починка Apache AGE OID после восстановления дампа
+
+При восстановлении дампа БД на новом сервере Apache AGE граф `chunk_entity_relation` ломается: `graphid` в таблице `ag_catalog.ag_graph` сохраняет старый OID из дампа, а схема в `pg_namespace` получает новый OID. Это приводит к ошибке `graph with oid XXXXX does not exist` при cypher-запросах.
+
+### Диагностика
+
+```bash
+docker compose exec postgres psql -U voproshalych -d voproshalych -c "
+LOAD 'age';
+SET search_path = ag_catalog, public;
+SELECT graphid, name, namespace FROM ag_graph WHERE name = 'chunk_entity_relation';
+SELECT nspname, oid FROM pg_namespace WHERE nspname = 'chunk_entity_relation';
+"
+```
+
+Если `graphid` не совпадает с `pg_namespace.oid` — нужно починить.
+
+### Фикс
+
+Замените `<old_graphid>` на значение `graphid` из диагностики выше:
+
+```bash
+docker compose exec postgres psql -U voproshalych -d voproshalych -c "
+LOAD 'age';
+SET search_path = ag_catalog, public;
+
+-- Обойти FK проверки (voproshalych = superuser)
+SET session_replication_role = 'replica';
+
+-- Обновить graphid в ag_graph
+UPDATE ag_graph
+SET graphid = (SELECT oid FROM pg_namespace WHERE nspname = 'chunk_entity_relation')
+WHERE name = 'chunk_entity_relation';
+
+-- Обновить все ссылки в ag_label
+UPDATE ag_label
+SET graph = (SELECT oid FROM pg_namespace WHERE nspname = 'chunk_entity_relation')
+WHERE graph = <old_graphid>;
+
+SET session_replication_role = 'origin';
+"
+```
+
+### Проверка
+
+```bash
+docker compose exec postgres psql -U voproshalych -d voproshalych -c "
+LOAD 'age';
+SET search_path = ag_catalog, public;
+SELECT count(*) FROM cypher('chunk_entity_relation', \$\$MATCH (n) RETURN n\$\$) AS (n agtype);
+"
+```
+
+Должно вернуть ~974 ноды (или другое количество, в зависимости от состояния базы знаний).
