@@ -286,8 +286,9 @@ func handleUpdate(
 		}
 
 		buttons := action.Buttons
-		if len(buttons) == 0 && len(action.ReplyKeyboard) > 0 {
-			buttons = convertReplyToInline(action.ReplyKeyboard)
+		if len(action.ReplyKeyboard) > 0 {
+			replyButtons := convertReplyToInline(action.ReplyKeyboard)
+			buttons = append(buttons, replyButtons...)
 		}
 
 		if err := sendMessage(ctx, api, userID, chatID, text, buttons); err != nil {
