@@ -674,7 +674,7 @@ func detectButtonIntent(callbackData string) schemes.Intent {
 // stripHTMLToPlain преобразует HTML-разметку в обычный текст.
 func stripHTMLToPlain(text string) string {
 	linkRegex := regexp.MustCompile(`<a href="([^"]+)">([^<]+)</a>`)
-	text = linkRegex.ReplaceAllString(text, "$2 ($1)")
+	text = linkRegex.ReplaceAllString(text, "$2\n— $1")
 	return text
 }
 

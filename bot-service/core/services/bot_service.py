@@ -589,12 +589,15 @@ class BotService:
         """Возвращает inline-кнопки для оценки ответа.
 
         Returns:
-            list[list[InlineButton]]: Кнопки лайка и дизлайка.
+            list[list[InlineButton]]: Кнопки лайка, дизлайка и нового диалога.
         """
 
         return [
             [
                 InlineButton(text="❤️", callback_data="feedback:like"),
                 InlineButton(text="👎", callback_data="feedback:dislike"),
-            ]
+            ],
+            [
+                InlineButton(text="🔄 Новый диалог", callback_data="dialog:start_new"),
+            ],
         ]
