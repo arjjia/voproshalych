@@ -148,8 +148,9 @@ def process_llm_response(raw_answer: str) -> tuple[str, list[str]]:
     cleaned = clean_markdown(raw_answer)
     logger.info(f"[POSTPROCESS] After markdown clean: {len(cleaned)} chars")
 
-    # Remove "Использованные источники:" line if present
-    import re
+    cleaned = re.sub(r"^нет\.\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\([^)]*\)\s*", "", cleaned)
+
     cleaned = re.sub(
         r"\n*[Ии]спользованн?ые?\s+источники:\s*[\d,\s]+\n*",
         "\n",
