@@ -247,7 +247,7 @@ async def llm_model_func(
     """Кастомная LLM функция для LightRAG.
 
     Использует модель из LIGHT_RAG_LLM_MODEL если указана,
-    иначе использует основной LLM Pool (openrouter → gigachat → mistral).
+    иначе использует основной LLM Pool (mistral → openrouter).
     Добавляет задержку между вызовами для избежания rate limiting.
 
     Таймауты по кейсам:

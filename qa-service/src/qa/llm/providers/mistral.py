@@ -104,7 +104,8 @@ class MistralProvider(BaseLLMProvider):
             "max_tokens": max_tokens,
         }
 
-        logger.info(f"Mistral request: model={self._model}, prompt_len={len(prompt)} chars, messages={len(api_messages)}, timeout={timeout}s")
+        total_chars = sum(len(m.get("content", "")) for m in api_messages)
+        logger.info(f"Mistral request: model={self._model}, total_chars={total_chars}, messages={len(api_messages)}, timeout={timeout}s")
 
         last_error = None
 

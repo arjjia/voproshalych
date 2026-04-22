@@ -34,7 +34,7 @@ class LLMConfig(BaseSettings):
         openrouter_fallback_model: Резервная модель OpenRouter (random free)
         gigachat_client_id: Client ID GigaChat
         gigachat_client_secret: Client Secret GigaChat
-        model_priority: Приоритет провайдеров (по умолчанию: openrouter, gigachat, mistral)
+        model_priority: Приоритет провайдеров (по умолчанию: mistral, openrouter)
         lightrag_llm_model: Модель для индексации LightRAG (по умолчанию: первая из openrouter_models)
         default_temperature: Температура по умолчанию
         default_max_tokens: Максимальное количество токенов
@@ -64,7 +64,7 @@ class LLMConfig(BaseSettings):
     gigachat_client_id: str = Field(default="")
     gigachat_client_secret: str = Field(default="")
 
-    model_priority: str = Field(default="openrouter,mistral,gigachat")
+    model_priority: str = Field(default="mistral,openrouter")
     lightrag_llm_model: str = Field(default="")
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen3.6:35b")
@@ -74,12 +74,12 @@ class LLMConfig(BaseSettings):
 
     nemotron_timeout: int = Field(default=120)
     qwen_timeout: int = Field(default=180)
-    mistral_timeout: int = Field(default=600)
+    mistral_timeout: int = Field(default=90)
     gigachat_timeout: int = Field(default=120)
 
     keyword_extraction_timeout: int = Field(default=30)
     query_expansion_timeout: int = Field(default=20)
-    answer_generation_timeout: int = Field(default=120)
+    answer_generation_timeout: int = Field(default=60)
     graph_building_timeout: int = Field(default=600)
 
     model_config = SettingsConfigDict(
