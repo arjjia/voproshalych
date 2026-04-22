@@ -21,7 +21,7 @@ cp .env.example .env
 docker compose up -d --build
 
 # Или без MAX-бота и админки:
-docker compose up -d --build postgres db-migrate qa-service bot-core telegram-bot vk-bot
+docker compose up -d --build postgres db-migrate qa-service bot-core vk-bot
 
 # 3. Проверить состояние
 docker compose ps
