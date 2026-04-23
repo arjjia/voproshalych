@@ -31,15 +31,6 @@ docker compose ps
 
 Полный список переменных — в [.env.example](.env.example). Основные группы:
 
-| Группа | Переменные | Описание |
-|--------|-----------|----------|
-| Bot Core | `BOT_CORE_URL`, `TELEGRAM_BOT_TOKEN`, `VK_BOT_TOKEN`, `MAX_BOT_TOKEN` | URL бизнес-логики и токены мессенджеров |
-| Database | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST` | Подключение к PostgreSQL |
-| LLM Providers | `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, `GIGACHAT_CLIENT_ID` | API-ключи LLM-провайдеров |
-| QA Service | `QA_SERVICE_URL`, `DIALOG_CONTEXT_LIMIT_MESSAGES` | Настройки QA-сервиса |
-| LightRAG | `LIGHT_RAG_LLM_MODEL`, `LIGHT_RAG_POSTGRES_URI`, `CHUNK_TOKEN_SIZE` | Параметры RAG-движка |
-| Ollama | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | LLM для индексации графа знаний |
-
 ### Системные требования
 
 | Параметр | Минимум |
@@ -78,82 +69,6 @@ docker compose ps
 | RAG | LightRAG v1.4.13 (Hybrid Search + Knowledge Graph) |
 | Package Manager | uv |
 | Bot Frameworks | aiogram (Telegram), vkbottle (VK), aiohttp (MAX) |
-
-### LightRAG: двухуровневое хранение
-
-LightRAG хранит данные о сущностях и связях одновременно в двух хранилищах:
-
-**SQL таблицы** (pgvector) — векторный поиск по cosine similarity:
-- `LIGHTRAG_VDB_CHUNKS_*` — векторы чанков документов
-- `LIGHTRAG_VDB_ENTITY_*` — векторы сущностей
-- `LIGHTRAG_VDB_RELATION_*` — векторы связей
-
-**AGE граф** (Apache AGE) — графовый обход для цепочек связей:
-- `chunk_entity_relation.base` — вершины (сущности)
-- `chunk_entity_relation.DIRECTED` — рёбра (связи)
-
-Векторный поиск находит "похожие" сущности, а графовый обход находит "связанные". Пример: запрос "как получить справку-вызов" → векторы находят сущность "Справка-вызов" → графовый обход находит цепочку: `Справка-вызов → Единый личный кабинет → elk.utmn.ru`.
-
-## Заполнение Базы Знаний
-
-Подробная документация: [qa-service/docs/KB_FILL_GUIDE.md](qa-service/docs/KB_FILL_GUIDE.md)
-
-### Источники данных
-
-| Ключ | Источник | Тип документов | Парсер |
-|------|----------|----------------|--------|
-| `confluence_help` | Confluence (пространство help) | 6 HTML-страниц + дочерние + 2 PDF (OCR) | ConfluenceHelpParser |
-| `confluence_study` | Confluence (пространство study) | Все leaf-страницы + PDF вложения (OCR) | ConfluenceStudyParser |
-| `sveden` | sveden.utmn.ru | 35 PDF (OCR) + 3 HTML с таблицами | SvedenParser |
-| `utmn` | utmn.ru | 1 PDF на 23 страницы (OCR) | UtmnParser |
-
-## Таблицы PostgreSQL
-
-### Основные таблицы приложения
-
-| Таблица | Описание |
-|---------|----------|
-| `users` | Пользователи бота |
-| `sessions` | Сессии пользователей |
-| `messages` | Сообщения пользователей |
-| `questions_answers` | История вопросов-ответов |
-| `subscriptions` | Подписки пользователей |
-| `holidays` | Праздники для рассылок |
-| `telemetry_logs` | Логи телеметрии |
-| `agent_traces` | Трассировка агентов |
-| `alembic_version` | Версии миграций БД |
-
-### LightRAG
-
-| Таблица | Описание |
-|---------|----------|
-| `lightrag_doc_full` | Полные документы |
-| `lightrag_doc_chunks` | Чанки документов |
-| `lightrag_doc_status` | Статус обработки документов |
-| `lightrag_full_entities` | Полные данные сущностей |
-| `lightrag_full_relations` | Полные данные связей |
-| `lightrag_entity_chunks` | Привязка сущностей к чанкам |
-| `lightrag_relation_chunks` | Привязка связей к чанкам |
-| `lightrag_vdb_chunks_*` | Векторы чанков (pgvector) |
-| `lightrag_vdb_entity_*` | Векторы сущностей (pgvector) |
-| `lightrag_vdb_relation_*` | Векторы связей (pgvector) |
-| `lightrag_llm_cache` | Кэш LLM ответов (для переиспользования) |
-
-### Apache AGE (граф знаний)
-
-| Таблица | Описание |
-|---------|----------|
-| `ag_graph` | Реестр графов (метаданные) |
-| `ag_label` | Типы вершин/рёбер (base, DIRECTED) |
-| `chunk_entity_relation.base` | Вершины (сущности) |
-| `chunk_entity_relation.DIRECTED` | Рёбра (связи) |
-
-### Расширения PostgreSQL
-
-| Расширение | Описание |
-|------------|----------|
-| `vector` | Векторный поиск (pgvector) |
-| `age` | Графовый движок (Apache AGE) |
 
 ## Документация
 
