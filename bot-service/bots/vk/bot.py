@@ -266,6 +266,9 @@ def _strip_html_to_plain(text: str) -> str:
     return text
 
 
+VK_INLINE_EXCLUDED = {"dialog:start_new"}
+
+
 def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:
     """Преобразует кнопки из ответа core в VK inline keyboard.
 
@@ -279,8 +282,17 @@ def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None
     if not button_rows:
         return None
 
+    filtered_rows: list[list[dict[str, str]]] = []
+    for row in button_rows:
+        filtered = [b for b in row if b.get("callback_data") not in VK_INLINE_EXCLUDED]
+        if filtered:
+            filtered_rows.append(filtered)
+
+    if not filtered_rows:
+        return None
+
     keyboard = Keyboard(inline=True)
-    for row_index, row in enumerate(button_rows):
+    for row_index, row in enumerate(filtered_rows):
         if row_index > 0:
             keyboard.row()
 
