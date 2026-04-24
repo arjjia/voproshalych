@@ -117,25 +117,9 @@ def _extract_sources_from_data(data: dict) -> list[str]:
     Returns:
         Список URL источников.
     """
-    if data.get("status") != "success":
-        return []
+    from qa.lightrag_adapter import extract_urls_from_search_data
 
-    result_data = data.get("data", {})
-    chunks = result_data.get("chunks", [])
-    references = result_data.get("references", [])
-
-    sources = set()
-    for chunk in chunks:
-        fp = chunk.get("file_path", "")
-        if fp and fp.startswith("http"):
-            sources.add(fp)
-
-    for ref in references:
-        fp = ref.get("file_path", "")
-        if fp and fp.startswith("http"):
-            sources.add(fp)
-
-    return list(sources)
+    return extract_urls_from_search_data(data, top_k=100)
 
 
 def _filter_used_sources(
@@ -212,8 +196,7 @@ async def ask_question(
     start_time = time.time()
 
     logger.info(
-        f"[{req_id}] {'=' * 60}\n"
-        f'[{req_id}] New question: "{request.question}"'
+        f"[{req_id}] {'=' * 60}\n" f'[{req_id}] New question: "{request.question}"'
     )
 
     if not is_lightrag_ready():
@@ -242,16 +225,32 @@ async def ask_question(
 
             if question_type == QUESTION_TYPE_KB:
                 result = await _handle_kb_question(
-                    req_id, search_query, request.question,
-                    request.context, llm_pool, config, timeouts, start_time,
+                    req_id,
+                    search_query,
+                    request.question,
+                    request.context,
+                    llm_pool,
+                    config,
+                    timeouts,
+                    start_time,
                 )
             elif question_type == QUESTION_TYPE_SYSTEM:
                 result = await _handle_system_question(
-                    req_id, request.question, llm_pool, config, timeouts, start_time,
+                    req_id,
+                    request.question,
+                    llm_pool,
+                    config,
+                    timeouts,
+                    start_time,
                 )
             else:
                 result = await _handle_general_question(
-                    req_id, request.question, llm_pool, config, timeouts, start_time,
+                    req_id,
+                    request.question,
+                    llm_pool,
+                    config,
+                    timeouts,
+                    start_time,
                 )
 
             result.expanded_query = classification.expanded_query
@@ -432,8 +431,7 @@ async def _handle_kb_question(
         final_sources = []
 
     logger.info(
-        f"[{req_id}] Sources: {len(sources)} found → "
-        f"1 selected for response"
+        f"[{req_id}] Sources: {len(sources)} found → " f"1 selected for response"
     )
 
     total_elapsed = time.time() - start_time

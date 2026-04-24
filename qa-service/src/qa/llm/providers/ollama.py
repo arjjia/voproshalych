@@ -28,11 +28,19 @@ class OllamaProvider(BaseLLMProvider):
     ):
         self._model = model or os.getenv("OLLAMA_MODEL", "qwen3.6:35b")
         self._base_url = (
-            base_url
-            or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         ).rstrip("/")
         self._api_url = f"{self._base_url}/api/chat"
+        self._api_key = os.getenv("OLLAMA_API_KEY", "")
         self._session = requests.Session()
+        if self._api_key:
+            self._session.headers.update({"Authorization": f"Bearer {self._api_key}"})
+        logger.info(
+            "Ollama provider initialized: base_url=%s model=%s auth=%s",
+            self._base_url,
+            self._model,
+            "set" if self._api_key else "empty",
+        )
 
     @property
     def name(self) -> str:
@@ -55,10 +63,7 @@ class OllamaProvider(BaseLLMProvider):
             latency_ms = int((time.time() - start_time) * 1000)
 
             if response.status_code == 200:
-                models = [
-                    m.get("name", "")
-                    for m in response.json().get("models", [])
-                ]
+                models = [m.get("name", "") for m in response.json().get("models", [])]
                 model_found = any(self._model in m for m in models)
                 if model_found:
                     return {
@@ -132,17 +137,14 @@ class OllamaProvider(BaseLLMProvider):
         }
 
         logger.info(
-            f"Ollama request: model={self._model}, "
-            f"prompt_len={len(prompt)} chars"
+            f"Ollama request: model={self._model}, " f"prompt_len={len(prompt)} chars"
         )
 
         last_error = None
 
         for attempt in range(3):
             try:
-                data = await asyncio.to_thread(
-                    self._sync_generate, payload, 300.0
-                )
+                data = await asyncio.to_thread(self._sync_generate, payload, 3600.0)
 
                 content = data.get("message", {}).get("content") or ""
 
@@ -170,10 +172,20 @@ class OllamaProvider(BaseLLMProvider):
             except requests.exceptions.HTTPError as e:
                 status_code = e.response.status_code if e.response is not None else 0
                 if status_code in (400, 401, 403, 404):
+                    if status_code in (401, 403):
+                        raise requests.exceptions.HTTPError(
+                            (
+                                "Ollama authorization failed "
+                                f"(HTTP {status_code}) for {self._base_url}. "
+                                "Проверьте OLLAMA_API_KEY и OLLAMA_BASE_URL."
+                            ),
+                            response=e.response,
+                            request=e.request,
+                        ) from e
                     raise
                 last_error = e
                 if attempt < 2:
-                    wait_time = 2.0 * (2 ** attempt)
+                    wait_time = 2.0 * (2**attempt)
                     logger.warning(
                         f"Ollama HTTP {status_code}, "
                         f"retrying in {wait_time}s (attempt {attempt + 1}/3)"
@@ -182,7 +194,7 @@ class OllamaProvider(BaseLLMProvider):
             except Exception as e:
                 last_error = e
                 if attempt < 2:
-                    wait_time = 2.0 * (2 ** attempt)
+                    wait_time = 2.0 * (2**attempt)
                     logger.warning(
                         f"Ollama error: {e}, "
                         f"retrying in {wait_time}s (attempt {attempt + 1}/3)"

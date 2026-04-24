@@ -64,23 +64,25 @@ relation{{tuple_delimiter}}Wi-Fi университета{{tuple_delimiter}}Ко
 """,
     ]
 
+
 _tokenizer = None
 
 _SENTENCE_SPLIT_RE = re.compile(
-    r'(?<=[.!?])\s+(?=[А-ЯЁA-Z])'
-    r'|(?<=;)\s*\n(?=\s*—)'
-    r'|(?<=:)\s*\n(?=\s*—)'
+    r"(?<=[.!?])\s+(?=[А-ЯЁA-Z])" r"|(?<=;)\s*\n(?=\s*—)" r"|(?<=:)\s*\n(?=\s*—)"
 )
 
 
 class HuggingFaceTokenizer:
     """Токенизатор на основе HuggingFace для LightRAG.
 
-    Использует тот же токенизатор что и embedding модель (deepvk/USER-bge-m3),
-    чтобы количество токенов совпадало.
+    Использует токенизатор embedding модели, чтобы количество
+    токенов совпадало.
     """
 
-    def __init__(self, model_name: str = "deepvk/USER-bge-m3"):
+    def __init__(
+        self,
+        model_name: str = "deepvk/USER-bge-m3",
+    ):
         from transformers import AutoTokenizer
 
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -97,7 +99,9 @@ class HuggingFaceTokenizer:
 def get_lightrag_tokenizer() -> HuggingFaceTokenizer:
     global _tokenizer
     if _tokenizer is None:
-        _tokenizer = HuggingFaceTokenizer("deepvk/USER-bge-m3")
+        _tokenizer = HuggingFaceTokenizer(
+            "deepvk/USER-bge-m3"
+        )
     return _tokenizer
 
 
@@ -129,7 +133,7 @@ def sentence_aware_chunking(
     if not content or not content.strip():
         return []
 
-    paragraphs = re.split(r'\n\s*\n', content)
+    paragraphs = re.split(r"\n\s*\n", content)
     sentences = []
     for para in paragraphs:
         para = para.strip()
@@ -154,17 +158,22 @@ def sentence_aware_chunking(
         sent_tokens = len(tokenizer.encode(sent))
 
         if sent_tokens > chunk_token_size * 1.5:
-            sub_lines = [s.strip() for s in sent.split('\n') if s.strip()]
+            sub_lines = [s.strip() for s in sent.split("\n") if s.strip()]
             if len(sub_lines) > 1:
                 for line in sub_lines:
                     line_tokens = len(tokenizer.encode(line))
-                    if current_tokens + line_tokens > chunk_token_size and current_sentences:
+                    if (
+                        current_tokens + line_tokens > chunk_token_size
+                        and current_sentences
+                    ):
                         chunk_text = " ".join(current_sentences)
-                        chunks.append({
-                            "tokens": current_tokens,
-                            "content": chunk_text.strip(),
-                            "chunk_order_index": len(chunks),
-                        })
+                        chunks.append(
+                            {
+                                "tokens": current_tokens,
+                                "content": chunk_text.strip(),
+                                "chunk_order_index": len(chunks),
+                            }
+                        )
                         current_sentences = []
                         current_tokens = 0
                     current_sentences.append(line)
@@ -173,17 +182,22 @@ def sentence_aware_chunking(
 
         if current_tokens + sent_tokens > chunk_token_size and current_sentences:
             chunk_text = " ".join(current_sentences)
-            chunks.append({
-                "tokens": current_tokens,
-                "content": chunk_text.strip(),
-                "chunk_order_index": len(chunks),
-            })
+            chunks.append(
+                {
+                    "tokens": current_tokens,
+                    "content": chunk_text.strip(),
+                    "chunk_order_index": len(chunks),
+                }
+            )
 
             overlap_sentences = []
             overlap_tokens = 0
             for s in reversed(current_sentences):
                 s_tok = len(tokenizer.encode(s))
-                if overlap_tokens + s_tok <= chunk_overlap_token_size or not overlap_sentences:
+                if (
+                    overlap_tokens + s_tok <= chunk_overlap_token_size
+                    or not overlap_sentences
+                ):
                     overlap_sentences.insert(0, s)
                     overlap_tokens += s_tok
                 else:
@@ -197,11 +211,13 @@ def sentence_aware_chunking(
 
     if current_sentences:
         chunk_text = " ".join(current_sentences)
-        chunks.append({
-            "tokens": current_tokens,
-            "content": chunk_text.strip(),
-            "chunk_order_index": len(chunks),
-        })
+        chunks.append(
+            {
+                "tokens": current_tokens,
+                "content": chunk_text.strip(),
+                "chunk_order_index": len(chunks),
+            }
+        )
 
     return chunks
 
@@ -257,7 +273,12 @@ async def llm_model_func(
     """
     global _llm_call_count, _llm_last_call_time
 
-    use_case = "keyword_extraction" if keyword_extraction else "default"
+    if keyword_extraction:
+        use_case = "keyword_extraction"
+    elif len(prompt) > 3000:
+        use_case = "graph_building"
+    else:
+        use_case = "default"
     timeout = _get_timeout_for_use_case(use_case)
 
     current_time = asyncio.get_event_loop().time()
@@ -285,13 +306,10 @@ async def llm_model_func(
 
             provider = OllamaProvider()
             logger.info(f"Using LightRAG model: Ollama/{provider._model}")
-            response = await asyncio.wait_for(
-                provider.generate(
-                    prompt=full_prompt,
-                    temperature=config.default_temperature,
-                    max_tokens=config.default_max_tokens,
-                ),
-                timeout=timeout,
+            response = await provider.generate(
+                prompt=full_prompt,
+                temperature=config.default_temperature,
+                max_tokens=config.default_max_tokens,
             )
             if response.content:
                 _log_keywords_if_extraction(keyword_extraction, response.content)
@@ -370,15 +388,14 @@ def _log_keywords_if_extraction(keyword_extraction: bool, content: str) -> None:
     if not keyword_extraction:
         return
     try:
-        match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+        match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
         if match:
             parsed = json.loads(match.group())
             hl = parsed.get("high_level_keywords", [])
             ll = parsed.get("low_level_keywords", [])
             _last_extracted_keywords = {"high_level": hl, "low_level": ll}
             logger.info(
-                f"[PIPELINE] Keywords extracted: "
-                f"high_level={hl}, low_level={ll}"
+                f"[PIPELINE] Keywords extracted: " f"high_level={hl}, low_level={ll}"
             )
         else:
             logger.warning(f"[PIPELINE] Keyword extraction: no JSON found in response")
@@ -397,9 +414,301 @@ def create_lightrag_config() -> dict:
             "postgresql://voproshalych:voproshalych@postgres:5432/voproshalych",
         ),
         "embedding_dimension": 1024,
-        "model_name": os.getenv("LIGHT_RAG_MODEL_NAME", "deepvk-user-bge-m3"),
+        "model_name": os.getenv(
+            "LIGHT_RAG_MODEL_NAME",
+            "deepvk-user-bge-m3",
+        ),
         "use_pg_graph": os.getenv("LIGHT_RAG_USE_PG_GRAPH", "true").lower() == "true",
         "chunk_token_size": int(os.getenv("CHUNK_TOKEN_SIZE", "500")),
         "chunk_overlap_token_size": int(os.getenv("CHUNK_OVERLAP_TOKEN_SIZE", "50")),
         "tokenizer": get_lightrag_tokenizer(),
     }
+
+
+async def create_lightrag_instance():
+    """Создать и инициализировать экземпляр LightRAG.
+
+    Не зависит от FastAPI. Может использоваться из скриптов
+    (fill_kb_unified, benchmarks) без запуска веб-сервера.
+
+    Returns:
+        Готовый к работе экземпляр LightRAG
+    """
+    from lightrag import LightRAG
+    from lightrag.utils import EmbeddingFunc
+
+    override_lightrag_prompts()
+    config = create_lightrag_config()
+
+    embedding_dimension = config.get("embedding_dimension", 1024)
+    model_name = config.get("model_name", "default")
+    storage_type = config.get("storage_type", "PostgreSQL")
+    use_pg_graph = config.get("use_pg_graph", True)
+    chunk_token_size = config.get("chunk_token_size", 500)
+    chunk_overlap_token_size = config.get("chunk_overlap_token_size", 50)
+    tokenizer = config.get("tokenizer")
+
+    rag = LightRAG(
+        working_dir=config["working_dir"],
+        llm_model_func=llm_model_func,
+        embedding_func=EmbeddingFunc(
+            embedding_dim=embedding_dimension,
+            max_token_size=512,
+            func=_embedding_func,
+            model_name=model_name,
+        ),
+        graph_storage=("PGGraphStorage" if use_pg_graph else "NetworkXStorage"),
+        vector_storage=("PGVectorStorage" if storage_type == "PostgreSQL" else None),
+        kv_storage=("PGKVStorage" if storage_type == "PostgreSQL" else None),
+        doc_status_storage=(
+            "PGDocStatusStorage" if storage_type == "PostgreSQL" else None
+        ),
+        chunk_token_size=chunk_token_size,
+        chunk_overlap_token_size=chunk_overlap_token_size,
+        chunking_func=sentence_aware_chunking,
+        tokenizer=tokenizer,
+        llm_model_max_async=1,
+        embedding_func_max_async=1,
+        default_llm_timeout=3600,
+        addon_params={"language": "Russian"},
+    )
+
+    if storage_type == "PostgreSQL":
+        await rag.initialize_storages()
+
+    _patch_merge_chunks()
+
+    logger.info("LightRAG instance created and initialized")
+    return rag
+
+
+_CHUNK_MERGE_PATCHED = False
+
+
+def _patch_merge_chunks():
+    """Заменить round-robin слияние на score-based.
+
+    LightRAG по умолчанию сливает чанки из трёх источников
+    (vector, entity, relation) через round-robin, что размывает
+    ранжирование. Патч заменяет алгоритм на скоринг:
+    - position_score = 1/(position+1) для каждого источника
+    - frequency bonus для entity/relation чанков
+    - при дублях — берётся лучший скор
+    """
+    global _CHUNK_MERGE_PATCHED
+    if _CHUNK_MERGE_PATCHED:
+        return
+
+    import lightrag.operate as operate_mod
+
+    _find_entities = operate_mod._find_related_text_unit_from_entities
+    _find_relations = operate_mod._find_related_text_unit_from_relations
+
+    async def _score_based_merge(
+        filtered_entities,
+        filtered_relations,
+        vector_chunks,
+        query="",
+        knowledge_graph_inst=None,
+        text_chunks_db=None,
+        query_param=None,
+        chunks_vdb=None,
+        chunk_tracking=None,
+        query_embedding=None,
+    ):
+        if chunk_tracking is None:
+            chunk_tracking = {}
+
+        entity_chunks = []
+        if filtered_entities and text_chunks_db:
+            entity_chunks = await _find_entities(
+                filtered_entities,
+                query_param,
+                text_chunks_db,
+                knowledge_graph_inst,
+                query,
+                chunks_vdb,
+                chunk_tracking=chunk_tracking,
+                query_embedding=query_embedding,
+            )
+
+        relation_chunks = []
+        if filtered_relations and text_chunks_db:
+            relation_chunks = await _find_relations(
+                filtered_relations,
+                query_param,
+                text_chunks_db,
+                entity_chunks,
+                query,
+                chunks_vdb,
+                chunk_tracking=chunk_tracking,
+                query_embedding=query_embedding,
+            )
+
+        scored: dict[str, dict] = {}
+
+        for pos, chunk in enumerate(vector_chunks):
+            cid = chunk.get("chunk_id") or chunk.get("id")
+            if not cid:
+                continue
+            score = 1.0 / (pos + 1)
+            prev = scored.get(cid)
+            if prev is None or prev["_score"] < score:
+                scored[cid] = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "chunk_id": cid,
+                    "_score": score,
+                }
+
+        for pos, chunk in enumerate(entity_chunks):
+            cid = chunk.get("chunk_id") or chunk.get("id")
+            if not cid:
+                continue
+            freq = chunk_tracking.get(cid, {}).get("frequency", 1)
+            score = (1.0 / (pos + 1)) * freq
+            prev = scored.get(cid)
+            if prev is None:
+                scored[cid] = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get(
+                        "file_path", "unknown_source"
+                    ),
+                    "chunk_id": cid,
+                    "_score": score,
+                }
+            else:
+                prev["_score"] += score
+
+        for pos, chunk in enumerate(relation_chunks):
+            cid = chunk.get("chunk_id") or chunk.get("id")
+            if not cid:
+                continue
+            freq = chunk_tracking.get(cid, {}).get("frequency", 1)
+            score = (1.0 / (pos + 1)) * freq * 0.8
+            prev = scored.get(cid)
+            if prev is None:
+                scored[cid] = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get(
+                        "file_path", "unknown_source"
+                    ),
+                    "chunk_id": cid,
+                    "_score": score,
+                }
+            else:
+                prev["_score"] += score
+
+        merged = sorted(scored.values(), key=lambda x: -x["_score"])
+        origin_len = (
+            len(vector_chunks)
+            + len(entity_chunks)
+            + len(relation_chunks)
+        )
+        for item in merged:
+            item.pop("_score", None)
+
+        logger.info(
+            "Score-based merged chunks: %d -> %d "
+            "(deduplicated %d)",
+            origin_len,
+            len(merged),
+            origin_len - len(merged),
+        )
+        return merged
+
+    operate_mod._merge_all_chunks = _score_based_merge
+    _CHUNK_MERGE_PATCHED = True
+    logger.info("LightRAG _merge_all_chunks patched: score-based merge")
+
+
+def _extract_file_paths_from_search_data(
+    search_data: dict,
+    top_k: int = 10,
+) -> list[str]:
+    """Извлечь file_path из результата aquery_data LightRAG.
+
+    Значения file_path извлекаются из chunks и references
+    в порядке ранжирования с дедупликацией.
+
+    Args:
+        search_data: Результат rag.aquery_data()
+        top_k: Максимум значений для возврата
+
+    Returns:
+        Список file_path в порядке ранжирования
+    """
+    if search_data.get("status") != "success":
+        return []
+
+    result_data = search_data.get("data", {})
+    chunks = result_data.get("chunks", [])
+    references = result_data.get("references", [])
+
+    file_paths: list[str] = []
+    seen: set[str] = set()
+
+    for chunk in chunks:
+        fp = chunk.get("file_path", "")
+        if fp and fp not in seen:
+            file_paths.append(fp)
+            seen.add(fp)
+            if len(file_paths) >= top_k:
+                return file_paths
+
+    for ref in references:
+        fp = ref.get("file_path", "")
+        if fp and fp not in seen:
+            file_paths.append(fp)
+            seen.add(fp)
+            if len(file_paths) >= top_k:
+                return file_paths
+
+    return file_paths
+
+
+def extract_urls_from_search_data(
+    search_data: dict,
+    top_k: int = 10,
+) -> list[str]:
+    """Извлечь URL источников из результата aquery_data LightRAG."""
+    file_paths = _extract_file_paths_from_search_data(search_data, top_k * 3)
+    urls: list[str] = []
+    for fp in file_paths:
+        if fp.startswith("http"):
+            urls.append(fp)
+            if len(urls) >= top_k:
+                break
+    return urls
+
+
+def extract_chunk_ids_from_search_data(
+    search_data: dict,
+    top_k: int = 10,
+    prefix: str = "dataset_chunk:",
+) -> list[str]:
+    """Извлечь chunk_id из file_path результата aquery_data LightRAG.
+
+    Ожидается, что при импорте chunk_id сохранялся в file_path
+    в формате ``dataset_chunk:<id>``.
+
+    Args:
+        search_data: Результат rag.aquery_data()
+        top_k: Максимум chunk_id для возврата
+        prefix: Префикс file_path с chunk_id
+
+    Returns:
+        Список chunk_id в порядке ранжирования
+    """
+    file_paths = _extract_file_paths_from_search_data(search_data, top_k * 3)
+    chunk_ids: list[str] = []
+
+    for fp in file_paths:
+        if fp.startswith(prefix):
+            chunk_id = fp[len(prefix) :].strip()
+            if chunk_id:
+                chunk_ids.append(chunk_id)
+                if len(chunk_ids) >= top_k:
+                    break
+
+    return chunk_ids

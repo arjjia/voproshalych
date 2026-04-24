@@ -42,57 +42,9 @@ async def init_lightrag():
     global _lightrag, _lightrag_ready
 
     try:
-        from lightrag import LightRAG
-        from lightrag.utils import EmbeddingFunc
-        from .lightrag_adapter import (
-            llm_model_func,
-            _embedding_func,
-            create_lightrag_config,
-            sentence_aware_chunking,
-            override_lightrag_prompts,
-        )
+        from .lightrag_adapter import create_lightrag_instance
 
-        override_lightrag_prompts()
-
-        config = create_lightrag_config()
-
-        logger.info(f"Initializing LightRAG with config: {config}")
-
-        embedding_dimension = config.get("embedding_dimension", 1024)
-        model_name = config.get("model_name", "default")
-
-        storage_type = config.get("storage_type", "PostgreSQL")
-
-        use_pg_graph = config.get("use_pg_graph", True)
-        chunk_token_size = config.get("chunk_token_size", 500)
-        chunk_overlap_token_size = config.get("chunk_overlap_token_size", 50)
-        tokenizer = config.get("tokenizer")
-
-        _lightrag = LightRAG(
-            working_dir=config["working_dir"],
-            llm_model_func=llm_model_func,
-            embedding_func=EmbeddingFunc(
-                embedding_dim=embedding_dimension,
-                max_token_size=512,
-                func=_embedding_func,
-                model_name=model_name,
-            ),
-            graph_storage="PGGraphStorage" if use_pg_graph else "NetworkXStorage",
-            vector_storage="PGVectorStorage" if storage_type == "PostgreSQL" else None,
-            kv_storage="PGKVStorage" if storage_type == "PostgreSQL" else None,
-            doc_status_storage="PGDocStatusStorage" if storage_type == "PostgreSQL" else None,
-            chunk_token_size=chunk_token_size,
-            chunk_overlap_token_size=chunk_overlap_token_size,
-            chunking_func=sentence_aware_chunking,
-            tokenizer=tokenizer,
-            llm_model_max_async=1,
-            embedding_func_max_async=1,
-            addon_params={"language": "Russian"},
-        )
-
-        if storage_type == "PostgreSQL":
-            await _lightrag.initialize_storages()
-
+        _lightrag = await create_lightrag_instance()
         _lightrag_ready = True
         logger.info("LightRAG initialized successfully with PostgreSQL storage")
 
