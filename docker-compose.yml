@@ -212,6 +212,17 @@ services:
       admin-service:
         condition: service_healthy
 
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    restart: unless-stopped
+    ports:
+      - "${LIGHTRAG_PORT:-9621}:9621"
+    env_file:
+      - .env.lightrag
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
 
