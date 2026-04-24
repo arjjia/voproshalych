@@ -23,6 +23,7 @@ RUN test -f /run/secrets/hf_token && HF_TOKEN=$(cat /run/secrets/hf_token) uv ru
 
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY benchmarks/ ./benchmarks/
 
 ENV PYTHONPATH=/app/src:/usr/local/lib/python3.12/site-packages
 ENV HF_TOKEN=${HF_TOKEN:-}
