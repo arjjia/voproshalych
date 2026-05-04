@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -254,6 +255,24 @@ func handleUpdate(
 	payload, err := buildIncomingMessage(messageUpdate)
 	if err != nil {
 		return err
+	}
+
+	if shouldShowPendingMessage(payload) {
+		var chatID int64
+		var userID int64
+		switch {
+		case messageUpdate.Message.Recipient.ChatId != 0:
+			chatID = messageUpdate.Message.Recipient.ChatId
+		case messageUpdate.Message.Sender.UserId != 0:
+			userID = messageUpdate.Message.Sender.UserId
+		}
+
+		if userID != 0 || chatID != 0 {
+			_ = sendMessage(ctx, api, userID, chatID,
+				"Сейчас я попробую ответить на этот вопрос, это может занять какое-то время...",
+				nil,
+			)
+		}
 	}
 
 	response, err := coreClient.ProcessMessage(ctx, payload)
@@ -669,6 +688,25 @@ func detectButtonIntent(callbackData string) schemes.Intent {
 	default:
 		return schemes.DEFAULT
 	}
+}
+
+// shouldShowPendingMessage определяет, нужно ли показывать сообщение ожидания.
+func shouldShowPendingMessage(msg IncomingMessage) bool {
+	if msg.MessageType != "text" {
+		return false
+	}
+
+	normalized := strings.TrimSpace(strings.ToLower(msg.Text))
+	excluded := map[string]bool{
+		"/start":          true,
+		"start":           true,
+		"начать":          true,
+		"📋 помощь":       true,
+		"🔄 новый диалог": true,
+		"🔔 рассылка":     true,
+	}
+
+	return !excluded[normalized]
 }
 
 // stripHTMLToPlain преобразует HTML-разметку в обычный текст.
