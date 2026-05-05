@@ -31,6 +31,36 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
+
+class QuestionDedup:
+    def __init__(self, similarity_threshold: float = 0.7):
+        self._questions: List[str] = []
+        self._words_sets: List[Set[str]] = []
+        self._threshold = similarity_threshold
+
+    @staticmethod
+    def _normalize(text: str) -> Set[str]:
+        words = re.findall(r"[а-яёa-z0-9]+", text.lower())
+        stop = {"в", "на", "и", "с", "по", "к", "у", "о", "а", "не", "как", "то", "за", "из", "от", "до", "для", "это", "что", "есть", "быть", "мой", "мне", "меня", "я"}
+        return set(w for w in words if w not in stop)
+
+    def is_duplicate(self, question: str) -> bool:
+        words = self._normalize(question)
+        if len(words) < 3:
+            return True
+        for existing_words in self._words_sets:
+            if not existing_words:
+                continue
+            intersection = len(words & existing_words)
+            union = len(words | existing_words)
+            if union > 0 and intersection / union >= self._threshold:
+                return True
+        return False
+
+    def add(self, question: str):
+        self._questions.append(question)
+        self._words_sets.append(self._normalize(question))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -76,14 +106,10 @@ CATEGORY_PROMPTS = {
 
 Сгенерируй ОДИН осмысленный вопрос в поддержку и краткий идеальный ответ.
 
-Требования к вопросу:
-- Вопрос обязан напрямую опираться на факты из этого конкретного фрагмента.
-- Стиль: живой студент ТюмГУ пишет в чат поддержки.
-- Используй неформальные обороты: "чё это", "как так-то", "чё за", "блин", "стипуха", "пересдача", "отработка", "сессия", "зачёт", "хвосты".
-- Избегай канцелярита.
+{common_style}
 
 Текст фрагмента:
-{chunk_text}
+{{chunk_text}}
 
 Верни ТОЛЬКО JSON:
 {{"question": "...", "ground_truth_answer": "..."}}""",
@@ -92,32 +118,28 @@ CATEGORY_PROMPTS = {
 
 Сгенерируй ОДИН вопрос, на который нельзя ответить только по одному из фрагментов — нужно соединить информацию из обоих.
 
-Требования к вопросу:
-- Стиль: студент пишет в чат поддержки ТюмГУ.
+{common_style}
 - Вопрос должен требовать информацию из обоих фрагментов.
-- Используй сленг: "стипуха", "сессия", "хвосты", "зачётка" и т.д.
 
 Фрагмент 1:
-{chunk_text_1}
+{{chunk_text_1}}
 
 Фрагмент 2:
-{chunk_text_2}
+{{chunk_text_2}}
 
 Верни ТОЛЬКО JSON:
 {{"question": "...", "ground_truth_answer": "..."}}""",
 
     CATEGORY_NAVIGATION: """Тебе показали фрагмент документа Тюменского государственного университета (ТюмГУ).
-Название института/подразделения: {institute_name}
+Название института/подразделения: {{institute_name}}
 
 Сгенерируй вопрос, в котором назван этот конкретный институт/подразделение.
 
-Требования:
-- Стиль: студент пишет в чат поддержки.
+{common_style}
 - Вопрос должен содержать название института или его аббревиатуру.
-- Используй сленг, неформальный стиль.
 
 Текст фрагмента:
-{chunk_text}
+{{chunk_text}}
 
 Верни ТОЛЬКО JSON:
 {{"question": "...", "ground_truth_answer": "..."}}""",
@@ -126,15 +148,13 @@ CATEGORY_PROMPTS = {
 
 Сгенерируй вопрос, содержащий 2+ УСЛОВИЯ (например: "бюджетник + хвосты", "заочник + академ", "платник + перевестись").
 
-Требования:
-- Стиль: студент пишет в чат поддержки.
+{common_style}
 - Вопрос должен содержать минимум 2 конкретных условия/статуса.
-- Используй сленг: "хвосты", "бюджетник", "платник", "заочник", "очник" и т.д.
 
-Ключевые сущности из документа: {entities}
+Ключевые сущности из документа: {{entities}}
 
 Текст фрагмента:
-{chunk_text}
+{{chunk_text}}
 
 Верни ТОЛЬКО JSON:
 {{"question": "...", "ground_truth_answer": "..."}}""",
@@ -143,15 +163,13 @@ CATEGORY_PROMPTS = {
 
 Сгенерируй вопрос, в котором названа конкретная дисциплина или специфический регламент/положение.
 
-Требования:
-- Стиль: студент пишет в чат поддержки.
+{common_style}
 - В вопросе должна быть названа конкретная дисциплина или документ.
-- Используй сленг, неформальный стиль.
 
-Название/сущность: {entity_name}
+Название/сущность: {{entity_name}}
 
 Текст фрагмента:
-{chunk_text}
+{{chunk_text}}
 
 Верни ТОЛЬКО JSON:
 {{"question": "...", "ground_truth_answer": "..."}}""",
@@ -164,10 +182,12 @@ CATEGORY_PROMPTS = {
 - Используй сокращения ("общага" вместо "общежитие", "стипуха" вместо "стипендия", "сесия" вместо "сессия")
 - Можно написать 2-3 слова без контекста
 
+{common_style}
+
 Оригинальный (правильный) вопрос сохрани в поле "clean_question".
 
 Текст фрагмента:
-{chunk_text}
+{{chunk_text}}
 
 Верни ТОЛЬКО JSON:
 {{"question": "... (испорченный)", "clean_question": "... (правильный)", "ground_truth_answer": "..."}}""",
@@ -184,6 +204,14 @@ TYPO_TEMPLATES = {
     "деканат": "диконат",
     "расписание": "росписание",
 }
+
+COMMON_STYLE = """ОБЯЗАТЕЛЬНЫЙ СТИЛЬ вопроса:
+- Пиши как реальный студент в чат — небрежно, быстро, строчными
+- Сокращения: тюмгу (не "Тюменский государственный университет"), шкн, фэи, соцгум, ипип, биофак, инзем, инхим, фти, инбио, ифк, егш, шпи, шен, уиот
+- Английские термины по-русски: лмс (не LMS), яндекс почта (не Yandex.Mail), корпоративная почта, эл журнал
+- Сленг: стипуха, сессия, зачётка, хвосты, пересдача, академ, бюджетник, платник, заочник, очник, общага, деканат, проректор, отработка, курсач, дипломная
+- Можно без знаков препинания, строчными буквами
+- Вопрос ОБЯЗАН напрямую опираться на факты из фрагмента"""
 
 
 def _parse_json(text: str) -> Dict[str, Any]:
@@ -274,14 +302,23 @@ class DBData:
     def find_shared_entity_pairs(self, max_pairs: int = 100) -> List[Tuple[str, str, str]]:
         disc = self.get_discriminative_entities(min_docs=2, max_docs=30)
         pairs = []
+        max_per_entity = 2
         for entity in disc:
             docs = list(self.entity_to_docs[entity])
+            random.shuffle(docs)
+            count = 0
             for i in range(len(docs)):
                 for j in range(i + 1, len(docs)):
                     pairs.append((entity, docs[i], docs[j]))
-                    if len(pairs) >= max_pairs:
-                        return pairs
-        return pairs
+                    count += 1
+                    if count >= max_per_entity:
+                        break
+                if count >= max_per_entity:
+                    break
+            if len(pairs) >= max_pairs:
+                break
+        random.shuffle(pairs)
+        return pairs[:max_pairs]
 
 
 class DatasetGenerator:
@@ -310,7 +347,9 @@ class DatasetGenerator:
         return (resp.choices[0].message.content or "").strip()
 
     def generate_direct(self, chunk: Dict) -> Optional[Dict]:
-        prompt = CATEGORY_PROMPTS[CATEGORY_DIRECT].format(chunk_text=chunk["content"][:1500])
+        prompt = CATEGORY_PROMPTS[CATEGORY_DIRECT].format(
+            chunk_text=chunk["content"][:1500], common_style=COMMON_STYLE
+        )
         content = self._generate(
             "Ты формируешь synthetic dataset для RAG-бенчмарков. "
             "Каждый вопрос должен быть привязан к конкретному фрагменту, "
@@ -328,6 +367,7 @@ class DatasetGenerator:
         prompt = CATEGORY_PROMPTS[CATEGORY_CROSS_DOC].format(
             chunk_text_1=chunk1["content"][:800],
             chunk_text_2=chunk2["content"][:800],
+            common_style=COMMON_STYLE,
         )
         content = self._generate(
             "Ты формируешь кросс-документные вопросы для RAG-бенчмарков. "
@@ -345,6 +385,7 @@ class DatasetGenerator:
         prompt = CATEGORY_PROMPTS[CATEGORY_NAVIGATION].format(
             chunk_text=chunk["content"][:1500],
             institute_name=institute,
+            common_style=COMMON_STYLE,
         )
         content = self._generate(
             "Ты формируешь навигационные вопросы для RAG-бенчмарков. "
@@ -362,6 +403,7 @@ class DatasetGenerator:
         prompt = CATEGORY_PROMPTS[CATEGORY_CONDITIONAL].format(
             chunk_text=chunk["content"][:1500],
             entities=", ".join(entities[:5]),
+            common_style=COMMON_STYLE,
         )
         content = self._generate(
             "Ты формируешь условные/составные вопросы для RAG-бенчмарков. "
@@ -379,6 +421,7 @@ class DatasetGenerator:
         prompt = CATEGORY_PROMPTS[CATEGORY_DISCIPLINE].format(
             chunk_text=chunk["content"][:1500],
             entity_name=entity_name,
+            common_style=COMMON_STYLE,
         )
         content = self._generate(
             "Ты формируешь вопросы по конкретным дисциплинам для RAG-бенчмарков. "
@@ -394,7 +437,7 @@ class DatasetGenerator:
 
     def generate_poorly_formed(self, chunk: Dict) -> Optional[Dict]:
         prompt = CATEGORY_PROMPTS[CATEGORY_POORLY_FORMED].format(
-            chunk_text=chunk["content"][:1500],
+            chunk_text=chunk["content"][:1500], common_style=COMMON_STYLE
         )
         content = self._generate(
             "Ты формируешь плохо сформулированные вопросы для RAG-бенчмарков. "
@@ -447,6 +490,7 @@ def generate_dataset(
 ) -> List[Dict]:
     dataset: List[Dict] = []
     errors: List[str] = []
+    dedup = QuestionDedup(similarity_threshold=0.65)
 
     # Build chunk_id -> confluence_url mapping
     chunk_to_url: Dict[str, str] = {}
@@ -454,43 +498,58 @@ def generate_dataset(
         if "file_path" in chunk and "id" in chunk:
             chunk_to_url[chunk["id"]] = chunk["file_path"]
 
+    chunk_usage: Dict[str, int] = defaultdict(int)
+    MAX_CHUNK_USAGE = 3
+
     chunks = db_data.chunks
     random.shuffle(chunks)
+
+    def _available(chunks_list: List[Dict]) -> List[Dict]:
+        return [c for c in chunks_list if chunk_usage[c["id"]] < MAX_CHUNK_USAGE]
 
     # Category 1: Cross-document
     cross_target = target_counts.get(CATEGORY_CROSS_DOC, 50)
     logger.info("=== Категория 1: Кросс-документные (цель: %d) ===", cross_target)
-    pairs = db_data.find_shared_entity_pairs(max_pairs=cross_target * 3)
+    pairs = db_data.find_shared_entity_pairs(max_pairs=cross_target * 4)
     random.shuffle(pairs)
     cross_generated = 0
     for entity, doc1, doc2 in pairs:
         if cross_generated >= cross_target:
             break
-        chunks_d1 = db_data.doc_id_to_chunks[doc1]
-        chunks_d2 = db_data.doc_id_to_chunks[doc2]
+        chunks_d1 = _available(db_data.doc_id_to_chunks[doc1])
+        chunks_d2 = _available(db_data.doc_id_to_chunks[doc2])
         if not chunks_d1 or not chunks_d2:
             continue
-        c1 = random.choice(chunks_d1)
-        c2 = random.choice(chunks_d2)
-        try:
-            result = generator.generate_cross_doc(c1, c2)
-            if result and "question" in result:
-                item = _make_item(
-                    question=result["question"],
-                    ground_truth_answer=result.get("ground_truth_answer", ""),
-                    category=CATEGORY_CROSS_DOC,
-                    chunk_ids=[c1["id"], c2["id"]],
-                    doc_ids=[doc1, doc2],
-                    chunk_texts=[c1["content"], c2["content"]],
-                    chunk_to_url=chunk_to_url,
-                )
-                )
-                dataset.append(item)
-                cross_generated += 1
-                logger.info("[%d/%d] cross-doc: %s...", cross_generated, cross_target, item["question"][:50])
-        except Exception as e:
-            errors.append(f"cross_doc: {e}")
-            logger.warning("Ошибка cross_doc: %s", e)
+        for attempt in range(3):
+            c1 = random.choice(chunks_d1)
+            c2 = random.choice(chunks_d2)
+            try:
+                result = generator.generate_cross_doc(c1, c2)
+                if result and "question" in result:
+                    q = result["question"].strip()
+                    if dedup.is_duplicate(q):
+                        logger.debug("cross-doc дубликат (попытка %d): %s", attempt + 1, q[:60])
+                        continue
+                    item = _make_item(
+                        question=q,
+                        ground_truth_answer=result.get("ground_truth_answer", ""),
+                        category=CATEGORY_CROSS_DOC,
+                        chunk_ids=[c1["id"], c2["id"]],
+                        doc_ids=[doc1, doc2],
+                        chunk_texts=[c1["content"], c2["content"]],
+                        chunk_to_url=chunk_to_url,
+                    )
+                    dataset.append(item)
+                    dedup.add(q)
+                    chunk_usage[c1["id"]] += 1
+                    chunk_usage[c2["id"]] += 1
+                    cross_generated += 1
+                    logger.info("[%d/%d] cross-doc: %s...", cross_generated, cross_target, item["question"][:50])
+                    break
+            except Exception as e:
+                errors.append(f"cross_doc: {e}")
+                logger.warning("Ошибка cross_doc: %s", e)
+                break
     logger.info("Кросс-документных: %d/%d", cross_generated, cross_target)
 
     # Category 2: Navigation
@@ -502,26 +561,37 @@ def generate_dataset(
     for chunk in nav_chunks:
         if nav_generated >= nav_target:
             break
-        institute = random.choice(INSTITUTES)
-        try:
-            result = generator.generate_navigation(chunk, institute)
-            if result and "question" in result:
-                doc_id = db_data.chunk_id_to_doc[chunk["id"]]
-                item = _make_item(
-                    question=result["question"],
-                    ground_truth_answer=result.get("ground_truth_answer", ""),
-                    category=CATEGORY_NAVIGATION,
-                    chunk_ids=[chunk["id"]],
-                    doc_ids=[doc_id],
-                    chunk_texts=[chunk["content"]],
-                    chunk_to_url=chunk_to_url,
-                )
-                dataset.append(item)
-                nav_generated += 1
-                logger.info("[%d/%d] navigation: %s...", nav_generated, nav_target, item["question"][:50])
-        except Exception as e:
-            errors.append(f"navigation: {e}")
-            logger.warning("Ошибка navigation: %s", e)
+        if chunk_usage[chunk["id"]] >= MAX_CHUNK_USAGE:
+            continue
+        for attempt in range(3):
+            institute = random.choice(INSTITUTES)
+            try:
+                result = generator.generate_navigation(chunk, institute)
+                if result and "question" in result:
+                    q = result["question"].strip()
+                    if dedup.is_duplicate(q):
+                        logger.debug("navigation дубликат (попытка %d): %s", attempt + 1, q[:60])
+                        continue
+                    doc_id = db_data.chunk_id_to_doc[chunk["id"]]
+                    item = _make_item(
+                        question=q,
+                        ground_truth_answer=result.get("ground_truth_answer", ""),
+                        category=CATEGORY_NAVIGATION,
+                        chunk_ids=[chunk["id"]],
+                        doc_ids=[doc_id],
+                        chunk_texts=[chunk["content"]],
+                        chunk_to_url=chunk_to_url,
+                    )
+                    dataset.append(item)
+                    dedup.add(q)
+                    chunk_usage[chunk["id"]] += 1
+                    nav_generated += 1
+                    logger.info("[%d/%d] navigation: %s...", nav_generated, nav_target, item["question"][:50])
+                    break
+            except Exception as e:
+                errors.append(f"navigation: {e}")
+                logger.warning("Ошибка navigation: %s", e)
+                break
     logger.info("Навигационных: %d/%d", nav_generated, nav_target)
 
     # Category 3: Conditional
@@ -534,28 +604,39 @@ def generate_dataset(
     for chunk in cond_chunks:
         if cond_generated >= cond_target:
             break
+        if chunk_usage[chunk["id"]] >= MAX_CHUNK_USAGE:
+            continue
         doc_id = db_data.chunk_id_to_doc[chunk["id"]]
         doc_entities = list(db_data.doc_to_entities.get(doc_id, set()) - NOISE_ENTITIES)
         if len(doc_entities) < 2:
             continue
-        try:
-            result = generator.generate_conditional(chunk, doc_entities)
-            if result and "question" in result:
-                item = _make_item(
-                    question=result["question"],
-                    ground_truth_answer=result.get("ground_truth_answer", ""),
-                    category=CATEGORY_CONDITIONAL,
-                    chunk_ids=[chunk["id"]],
-                    doc_ids=[doc_id],
-                    chunk_texts=[chunk["content"]],
-                    chunk_to_url=chunk_to_url,
-                )
-                dataset.append(item)
-                cond_generated += 1
-                logger.info("[%d/%d] conditional: %s...", cond_generated, cond_target, item["question"][:50])
-        except Exception as e:
-            errors.append(f"conditional: {e}")
-            logger.warning("Ошибка conditional: %s", e)
+        for attempt in range(3):
+            try:
+                result = generator.generate_conditional(chunk, doc_entities)
+                if result and "question" in result:
+                    q = result["question"].strip()
+                    if dedup.is_duplicate(q):
+                        logger.debug("conditional дубликат (попытка %d): %s", attempt + 1, q[:60])
+                        continue
+                    item = _make_item(
+                        question=q,
+                        ground_truth_answer=result.get("ground_truth_answer", ""),
+                        category=CATEGORY_CONDITIONAL,
+                        chunk_ids=[chunk["id"]],
+                        doc_ids=[doc_id],
+                        chunk_texts=[chunk["content"]],
+                        chunk_to_url=chunk_to_url,
+                    )
+                    dataset.append(item)
+                    dedup.add(q)
+                    chunk_usage[chunk["id"]] += 1
+                    cond_generated += 1
+                    logger.info("[%d/%d] conditional: %s...", cond_generated, cond_target, item["question"][:50])
+                    break
+            except Exception as e:
+                errors.append(f"conditional: {e}")
+                logger.warning("Ошибка conditional: %s", e)
+                break
     logger.info("Условных: %d/%d", cond_generated, cond_target)
 
     # Category 4: Discipline
@@ -578,28 +659,37 @@ def generate_dataset(
     for entity in discipline_entities:
         if disc_generated >= disc_target:
             break
-        entity_chunks = db_data.get_chunks_with_entity(entity)
+        entity_chunks = _available(db_data.get_chunks_with_entity(entity))
         if not entity_chunks:
             continue
         chunk = random.choice(entity_chunks)
-        try:
-            result = generator.generate_discipline(chunk, entity)
-            if result and "question" in result:
-                item = _make_item(
-                    question=result["question"],
-                    ground_truth_answer=result.get("ground_truth_answer", ""),
-                    category=CATEGORY_DISCIPLINE,
-                    chunk_ids=[chunk["id"]],
-                    doc_ids=[chunk["doc_id"]],
-                    chunk_texts=[chunk["content"]],
-                    chunk_to_url=chunk_to_url,
-                )
-                dataset.append(item)
-                disc_generated += 1
-                logger.info("[%d/%d] discipline: %s...", disc_generated, disc_target, item["question"][:50])
-        except Exception as e:
-            errors.append(f"discipline: {e}")
-            logger.warning("Ошибка discipline: %s", e)
+        for attempt in range(3):
+            try:
+                result = generator.generate_discipline(chunk, entity)
+                if result and "question" in result:
+                    q = result["question"].strip()
+                    if dedup.is_duplicate(q):
+                        logger.debug("discipline дубликат (попытка %d): %s", attempt + 1, q[:60])
+                        continue
+                    item = _make_item(
+                        question=q,
+                        ground_truth_answer=result.get("ground_truth_answer", ""),
+                        category=CATEGORY_DISCIPLINE,
+                        chunk_ids=[chunk["id"]],
+                        doc_ids=[chunk["doc_id"]],
+                        chunk_texts=[chunk["content"]],
+                        chunk_to_url=chunk_to_url,
+                    )
+                    dataset.append(item)
+                    dedup.add(q)
+                    chunk_usage[chunk["id"]] += 1
+                    disc_generated += 1
+                    logger.info("[%d/%d] discipline: %s...", disc_generated, disc_target, item["question"][:50])
+                    break
+            except Exception as e:
+                errors.append(f"discipline: {e}")
+                logger.warning("Ошибка discipline: %s", e)
+                break
     logger.info("По дисциплинам: %d/%d", disc_generated, disc_target)
 
     # Category 5: Poorly formed
@@ -611,30 +701,43 @@ def generate_dataset(
     for chunk in poor_chunks:
         if poor_generated >= poor_target:
             break
-        try:
-            result = generator.generate_poorly_formed(chunk)
-            if result and "question" in result:
-                doc_id = db_data.chunk_id_to_doc[chunk["id"]]
-                item = _make_item(
-                    question=result["question"],
-                    ground_truth_answer=result.get("ground_truth_answer", ""),
-                    category=CATEGORY_POORLY_FORMED,
-                    chunk_ids=[chunk["id"]],
-                    doc_ids=[doc_id],
-                    chunk_texts=[chunk["content"]],
-                    clean_question=result.get("clean_question"),
-                    chunk_to_url=chunk_to_url,
-                )
-                dataset.append(item)
-                poor_generated += 1
-                logger.info("[%d/%d] poorly_formed: %s...", poor_generated, poor_target, item["question"][:50])
-        except Exception as e:
-            errors.append(f"poorly_formed: {e}")
-            logger.warning("Ошибка poorly_formed: %s", e)
+        if chunk_usage[chunk["id"]] >= MAX_CHUNK_USAGE:
+            continue
+        for attempt in range(3):
+            try:
+                result = generator.generate_poorly_formed(chunk)
+                if result and "question" in result:
+                    q = result["question"].strip()
+                    clean = result.get("clean_question", "").strip()
+                    check_text = clean if clean else q
+                    if dedup.is_duplicate(check_text):
+                        logger.debug("poorly_formed дубликат (попытка %d): %s", attempt + 1, check_text[:60])
+                        continue
+                    doc_id = db_data.chunk_id_to_doc[chunk["id"]]
+                    item = _make_item(
+                        question=q,
+                        ground_truth_answer=result.get("ground_truth_answer", ""),
+                        category=CATEGORY_POORLY_FORMED,
+                        chunk_ids=[chunk["id"]],
+                        doc_ids=[doc_id],
+                        chunk_texts=[chunk["content"]],
+                        clean_question=clean,
+                        chunk_to_url=chunk_to_url,
+                    )
+                    dataset.append(item)
+                    dedup.add(check_text)
+                    chunk_usage[chunk["id"]] += 1
+                    poor_generated += 1
+                    logger.info("[%d/%d] poorly_formed: %s...", poor_generated, poor_target, item["question"][:50])
+                    break
+            except Exception as e:
+                errors.append(f"poorly_formed: {e}")
+                logger.warning("Ошибка poorly_formed: %s", e)
+                break
     logger.info("Плохо сформулированных: %d/%d", poor_generated, poor_target)
 
     # Category 6: Direct (control)
-    direct_target = target_counts.get(CATEGORY_DIRECT, 30)
+    direct_target = target_counts.get(CATEGORY_DIRECT, 100)
     logger.info("=== Категория 6: Прямые контрольные (цель: %d) ===", direct_target)
     direct_generated = 0
     direct_chunks = list(chunks)
@@ -642,25 +745,36 @@ def generate_dataset(
     for chunk in direct_chunks:
         if direct_generated >= direct_target:
             break
-        try:
-            result = generator.generate_direct(chunk)
-            if result and "question" in result:
-                doc_id = db_data.chunk_id_to_doc[chunk["id"]]
-                item = _make_item(
-                    question=result["question"],
-                    ground_truth_answer=result.get("ground_truth_answer", ""),
-                    category=CATEGORY_DIRECT,
-                    chunk_ids=[chunk["id"]],
-                    doc_ids=[doc_id],
-                    chunk_texts=[chunk["content"]],
-                    chunk_to_url=chunk_to_url,
-                )
-                dataset.append(item)
-                direct_generated += 1
-                logger.info("[%d/%d] direct: %s...", direct_generated, direct_target, item["question"][:50])
-        except Exception as e:
-            errors.append(f"direct: {e}")
-            logger.warning("Ошибка direct: %s", e)
+        if chunk_usage[chunk["id"]] >= MAX_CHUNK_USAGE:
+            continue
+        for attempt in range(3):
+            try:
+                result = generator.generate_direct(chunk)
+                if result and "question" in result:
+                    q = result["question"].strip()
+                    if dedup.is_duplicate(q):
+                        logger.debug("direct дубликат (попытка %d): %s", attempt + 1, q[:60])
+                        continue
+                    doc_id = db_data.chunk_id_to_doc[chunk["id"]]
+                    item = _make_item(
+                        question=q,
+                        ground_truth_answer=result.get("ground_truth_answer", ""),
+                        category=CATEGORY_DIRECT,
+                        chunk_ids=[chunk["id"]],
+                        doc_ids=[doc_id],
+                        chunk_texts=[chunk["content"]],
+                        chunk_to_url=chunk_to_url,
+                    )
+                    dataset.append(item)
+                    dedup.add(q)
+                    chunk_usage[chunk["id"]] += 1
+                    direct_generated += 1
+                    logger.info("[%d/%d] direct: %s...", direct_generated, direct_target, item["question"][:50])
+                    break
+            except Exception as e:
+                errors.append(f"direct: {e}")
+                logger.warning("Ошибка direct: %s", e)
+                break
     logger.info("Прямых: %d/%d", direct_generated, direct_target)
 
     logger.info("=== ИТОГО ===")

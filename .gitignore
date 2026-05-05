@@ -5,8 +5,7 @@
 .env
 .env.local
 .env.*.local
-.env.prod-1
-.env.local-1
+.env.prod
 .env.lightrag
 
 # Python
