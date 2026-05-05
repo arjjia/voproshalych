@@ -30,6 +30,7 @@ dependencies = [
     "asyncpg>=0.29.0",
     "pgvector>=0.2.0",
     "nest-asyncio>=1.6.0",
+    "openai>=2.34.0",
 ]
 
 [project.optional-dependencies]

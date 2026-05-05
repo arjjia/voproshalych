@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 from typing import Any, List
@@ -35,14 +36,14 @@ def override_lightrag_prompts():
 ```
 
 <Output>
-entity{{tuple_delimiter}}Тюменский государственный университет{{tuple_delimiter}}Organization{{tuple_delimiter}}Тюменский государственный университет (ТюмГУ) — высшее учебное заведение в городе Тюмень.
-entity{{tuple_delimiter}}Институт математики и компьютерных наук{{tuple_delimiter}}Department{{tuple_delimiter}}ИМиКН — структурное подразделение ТюмГУ.
-entity{{tuple_delimiter}}Иванов Пётр Сергеевич{{tuple_delimiter}}Person{{tuple_delimiter}}Ректор Тюменского государственного университета.
-entity{{tuple_delimiter}}Единый личный кабинет{{tuple_delimiter}}System{{tuple_delimiter}}Информационная система ТюмГУ на сайте elk.utmn.ru.
-entity{{tuple_delimiter}}Справка об обучении{{tuple_delimiter}}Document{{tuple_delimiter}}Документ, получаемый через Единый личный кабинет.
-relation{{tuple_delimiter}}Тюменский государственный университет{{tuple_delimiter}}Институт математики и компьютерных наук{{tuple_delimiter}}structure{{tuple_delimiter}}ИМиКН является подразделением ТюмГУ.
-relation{{tuple_delimiter}}Тюменский государственный университет{{tuple_delimiter}}Иванов Пётр Сергеевич{{tuple_delimiter}}leadership{{tuple_delimiter}}Иванов П.С. — ректор ТюмГУ.
-relation{{tuple_delimiter}}Единый личный кабинет{{tuple_delimiter}}Справка об обучении{{tuple_delimiter}}service{{tuple_delimiter}}Через ЕЛК можно получить справку.
+entity{tuple_delimiter}Тюменский государственный университет{tuple_delimiter}Organization{tuple_delimiter}Тюменский государственный университет (ТюмГУ) — высшее учебное заведение в городе Тюмень.
+entity{tuple_delimiter}Институт математики и компьютерных наук{tuple_delimiter}Department{tuple_delimiter}ИМиКН — структурное подразделение ТюмГУ.
+entity{tuple_delimiter}Иванов Пётр Сергеевич{tuple_delimiter}Person{tuple_delimiter}Ректор Тюменского государственного университета.
+entity{tuple_delimiter}Единый личный кабинет{tuple_delimiter}System{tuple_delimiter}Информационная система ТюмГУ на сайте elk.utmn.ru.
+entity{tuple_delimiter}Справка об обучении{tuple_delimiter}Document{tuple_delimiter}Документ, получаемый через Единый личный кабинет.
+relation{tuple_delimiter}Тюменский государственный университет{tuple_delimiter}Институт математики и компьютерных наук{tuple_delimiter}structure{tuple_delimiter}ИМиКН является подразделением ТюмГУ.
+relation{tuple_delimiter}Тюменский государственный университет{tuple_delimiter}Иванов Пётр Сергеевич{tuple_delimiter}leadership{tuple_delimiter}Иванов П.С. — ректор ТюмГУ.
+relation{tuple_delimiter}Единый личный кабинет{tuple_delimiter}Справка об обучении{tuple_delimiter}service{tuple_delimiter}Через ЕЛК можно получить справку.
 {completion_delimiter}
 
 """,
@@ -55,10 +56,10 @@ relation{{tuple_delimiter}}Единый личный кабинет{{tuple_delim
 ```
 
 <Output>
-entity{{tuple_delimiter}}Wi-Fi университета{{tuple_delimiter}}Resource{{tuple_delimiter}}Беспроводная сеть ТюмГУ.
-entity{{tuple_delimiter}}Корпоративная учётная запись{{tuple_delimiter}}System{{tuple_delimiter}}Учётная запись для авторизации в системах университета.
-entity{{tuple_delimiter}}Положение об информационных системах{{tuple_delimiter}}Document{{tuple_delimiter}}Документ от 15.03.2024 с правилами использования сети.
-relation{{tuple_delimiter}}Wi-Fi университета{{tuple_delimiter}}Корпоративная учётная запись{{tuple_delimiter}}access{{tuple_delimiter}}Для Wi-Fi нужна корпоративная учётная запись.
+entity{tuple_delimiter}Wi-Fi университета{tuple_delimiter}Resource{tuple_delimiter}Беспроводная сеть ТюмГУ.
+entity{tuple_delimiter}Корпоративная учётная запись{tuple_delimiter}System{tuple_delimiter}Учётная запись для авторизации в системах университета.
+entity{tuple_delimiter}Положение об информационных системах{tuple_delimiter}Document{tuple_delimiter}Документ от 15.03.2024 с правилами использования сети.
+relation{tuple_delimiter}Wi-Fi университета{tuple_delimiter}Корпоративная учётная запись{tuple_delimiter}access{tuple_delimiter}Для Wi-Fi нужна корпоративная учётная запись.
 {completion_delimiter}
 
 """,
@@ -486,17 +487,27 @@ _CHUNK_MERGE_PATCHED = False
 
 
 def _patch_merge_chunks():
-    """Заменить round-robin слияние на score-based.
+    """Заменить round-robin слияние на настраиваемый merge.
 
-    LightRAG по умолчанию сливает чанки из трёх источников
-    (vector, entity, relation) через round-robin, что размывает
-    ранжирование. Патч заменяет алгоритм на скоринг:
-    - position_score = 1/(position+1) для каждого источника
-    - frequency bonus для entity/relation чанков
-    - при дублях — берётся лучший скор
+    Поддерживаемые стратегии (MERGE_PRESET env):
+    - round_robin: дефолтный LightRAG round-robin (CHUNK_MERGE=round_robin)
+    - rrf: Reciprocal Rank Fusion (индустриальный стандарт)
+    - conditional: вектор-only при высокой уверенности, RRF при низкой
+    - score_tuned/cfg_a/cfg_b: score-based merge с разными весами
+
+    Дополнительные env-переменные:
+    - ENTITY_DEGREE_MAX: фильтр generic-сущностей (degree > N), 0=выкл
+    - RRF_K: константа RRF (default 60)
+    - CONDITIONAL_THRESHOLD: cosine-порог для vector confidence (default 0.85)
+    - CONDITIONAL_MIN_VECTOR: мин. число vector-результатов для confidence (default 5)
     """
     global _CHUNK_MERGE_PATCHED
     if _CHUNK_MERGE_PATCHED:
+        return
+
+    if os.getenv("CHUNK_MERGE", "").lower() == "round_robin":
+        logger.info("LightRAG _merge_all_chunks: round-robin (default, no patch)")
+        _CHUNK_MERGE_PATCHED = True
         return
 
     import lightrag.operate as operate_mod
@@ -504,7 +515,51 @@ def _patch_merge_chunks():
     _find_entities = operate_mod._find_related_text_unit_from_entities
     _find_relations = operate_mod._find_related_text_unit_from_relations
 
-    async def _score_based_merge(
+    def _cid(chunk: dict) -> str | None:
+        return chunk.get("chunk_id") or chunk.get("id")
+
+    def _res(chunk: dict, cid: str) -> dict:
+        return {
+            "content": chunk["content"],
+            "file_path": chunk.get("file_path", "unknown_source"),
+            "chunk_id": cid,
+        }
+
+    def _rrf_merge(
+        vector_chunks: list,
+        entity_chunks: list,
+        relation_chunks: list,
+        rrf_k: int = 60,
+    ) -> list[dict]:
+        scored: dict[str, dict] = {}
+        for rank, chunk in enumerate(vector_chunks):
+            c = _cid(chunk)
+            if not c:
+                continue
+            if c not in scored:
+                scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
+            scored[c]["_s"] += 1.0 / (rrf_k + rank + 1)
+
+        for rank, chunk in enumerate(entity_chunks):
+            c = _cid(chunk)
+            if not c:
+                continue
+            if c not in scored:
+                scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
+            scored[c]["_s"] += 1.0 / (rrf_k + rank + 1)
+
+        for rank, chunk in enumerate(relation_chunks):
+            c = _cid(chunk)
+            if not c:
+                continue
+            if c not in scored:
+                scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
+            scored[c]["_s"] += 1.0 / (rrf_k + rank + 1)
+
+        merged = sorted(scored.values(), key=lambda x: -x["_s"])
+        return [item["_r"] for item in merged]
+
+    async def _universal_merge(
         filtered_entities,
         filtered_relations,
         vector_chunks,
@@ -518,6 +573,21 @@ def _patch_merge_chunks():
     ):
         if chunk_tracking is None:
             chunk_tracking = {}
+
+        entity_degree_max = int(os.getenv("ENTITY_DEGREE_MAX", "0"))
+        if entity_degree_max > 0 and filtered_entities:
+            before = len(filtered_entities)
+            filtered_entities = [
+                e
+                for e in filtered_entities
+                if (e.get("rank") or 0) <= entity_degree_max
+            ]
+            logger.info(
+                "Entity degree filter: max=%d, %d/%d kept",
+                entity_degree_max,
+                len(filtered_entities),
+                before,
+            )
 
         entity_chunks = []
         if filtered_entities and text_chunks_db:
@@ -545,59 +615,235 @@ def _patch_merge_chunks():
                 query_embedding=query_embedding,
             )
 
+        merge_preset = os.getenv("MERGE_PRESET", "score_tuned").lower().strip()
+
+        if merge_preset == "rrf":
+            rrf_k = int(os.getenv("RRF_K", "60"))
+            merged = _rrf_merge(
+                vector_chunks, entity_chunks, relation_chunks, rrf_k
+            )
+            logger.info(
+                "RRF merge (k=%d): %d+%d+%d -> %d",
+                rrf_k,
+                len(vector_chunks),
+                len(entity_chunks),
+                len(relation_chunks),
+                len(merged),
+            )
+            return merged
+
+        if merge_preset == "conditional":
+            threshold = float(
+                os.getenv("CONDITIONAL_THRESHOLD", "0.85")
+            )
+            min_vec = int(os.getenv("CONDITIONAL_MIN_VECTOR", "5"))
+
+            if (
+                vector_chunks
+                and query_embedding is not None
+                and len(vector_chunks) >= min_vec
+            ):
+                try:
+                    top1_content = vector_chunks[0].get("content", "")[:500]
+                    emb_func = getattr(text_chunks_db, "embedding_func", None)
+                    if top1_content and emb_func:
+                        chunk_embs = await emb_func([top1_content])
+                        chunk_emb = np.array(chunk_embs[0])
+                        q_emb = np.array(query_embedding)
+                        cos_sim = float(
+                            np.dot(q_emb, chunk_emb)
+                            / (
+                                np.linalg.norm(q_emb)
+                                * np.linalg.norm(chunk_emb)
+                                + 1e-10
+                            )
+                        )
+                        logger.info(
+                            "Conditional: top-1 cosine=%.4f, "
+                            "threshold=%.2f",
+                            cos_sim,
+                            threshold,
+                        )
+                        if cos_sim >= threshold:
+                            merged = [
+                                _res(c, _cid(c))
+                                for c in vector_chunks
+                                if _cid(c)
+                            ]
+                            logger.info(
+                                "Conditional: confident (cos=%.4f), "
+                                "vector-only (%d)",
+                                cos_sim,
+                                len(merged),
+                            )
+                            return merged
+                except Exception as e:
+                    logger.warning(
+                        "Conditional: cosine check failed: %s", e
+                    )
+
+            if len(vector_chunks) >= min_vec:
+                merged = [
+                    _res(c, _cid(c))
+                    for c in vector_chunks
+                    if _cid(c)
+                ]
+                logger.info(
+                    "Conditional: vector confident (%d>=%d), "
+                    "vector-only",
+                    len(vector_chunks),
+                    min_vec,
+                )
+                return merged
+
+            merged = _rrf_merge(
+                vector_chunks, entity_chunks, relation_chunks
+            )
+            logger.info(
+                "Conditional: uncertain (%d<%d), RRF merge -> %d",
+                len(vector_chunks),
+                min_vec,
+                len(merged),
+            )
+            return merged
+
+        preset_values = {
+            "score_tuned": {
+                "MERGE_W_VECTOR": "1.0",
+                "MERGE_W_ENTITY": "1.0",
+                "MERGE_W_RELATION": "1.0",
+                "MERGE_GRAPH_ONLY_PENALTY": "1.0",
+                "MERGE_VECTOR_CONFIRM_BOOST": "1.1",
+            },
+            "score_cfg_a": {
+                "MERGE_W_VECTOR": "1.2",
+                "MERGE_W_ENTITY": "0.8",
+                "MERGE_W_RELATION": "0.6",
+                "MERGE_GRAPH_ONLY_PENALTY": "0.9",
+                "MERGE_VECTOR_CONFIRM_BOOST": "1.15",
+            },
+            "score_cfg_b": {
+                "MERGE_W_VECTOR": "1.1",
+                "MERGE_W_ENTITY": "1.0",
+                "MERGE_W_RELATION": "1.0",
+                "MERGE_GRAPH_ONLY_PENALTY": "0.9",
+                "MERGE_VECTOR_CONFIRM_BOOST": "1.2",
+            },
+        }
+        if merge_preset not in preset_values:
+            logger.warning(
+                "Unknown MERGE_PRESET='%s', fallback to 'score_tuned'",
+                merge_preset,
+            )
+            merge_preset = "score_tuned"
+
+        preset = preset_values[merge_preset]
+
+        vector_weight = float(
+            os.getenv("MERGE_W_VECTOR", preset["MERGE_W_VECTOR"])
+        )
+        entity_weight = float(
+            os.getenv("MERGE_W_ENTITY", preset["MERGE_W_ENTITY"])
+        )
+        relation_weight = float(
+            os.getenv("MERGE_W_RELATION", preset["MERGE_W_RELATION"])
+        )
+        freq_gamma = float(os.getenv("MERGE_FREQ_GAMMA", "0.35"))
+        freq_cap = float(os.getenv("MERGE_FREQ_CAP", "3.0"))
+        graph_only_penalty = float(
+            os.getenv(
+                "MERGE_GRAPH_ONLY_PENALTY",
+                preset["MERGE_GRAPH_ONLY_PENALTY"],
+            )
+        )
+        vector_confirm_boost = float(
+            os.getenv(
+                "MERGE_VECTOR_CONFIRM_BOOST",
+                preset["MERGE_VECTOR_CONFIRM_BOOST"],
+            )
+        )
+
+        logger.info(
+            "Score merge preset='%s': wv=%.2f we=%.2f wr=%.2f "
+            "gamma=%.2f cap=%.2f penalty=%.2f boost=%.2f",
+            merge_preset,
+            vector_weight,
+            entity_weight,
+            relation_weight,
+            freq_gamma,
+            freq_cap,
+            graph_only_penalty,
+            vector_confirm_boost,
+        )
+
+        def _freq_bonus(chunk_id: str) -> float:
+            freq = int(
+                chunk_tracking.get(chunk_id, {}).get("frequency", 1) or 1
+            )
+            return min(
+                freq_cap,
+                1.0 + freq_gamma * math.log1p(max(freq - 1, 0)),
+            )
+
+        def _rr_pos(position: int, offset: int) -> float:
+            return 1.0 / (3 * position + offset)
+
         scored: dict[str, dict] = {}
 
         for pos, chunk in enumerate(vector_chunks):
-            cid = chunk.get("chunk_id") or chunk.get("id")
-            if not cid:
+            c = _cid(chunk)
+            if not c:
                 continue
-            score = 1.0 / (pos + 1)
-            prev = scored.get(cid)
+            score = vector_weight * _rr_pos(pos, 1)
+            prev = scored.get(c)
             if prev is None or prev["_score"] < score:
-                scored[cid] = {
+                scored[c] = {
                     "content": chunk["content"],
                     "file_path": chunk.get("file_path", "unknown_source"),
-                    "chunk_id": cid,
+                    "chunk_id": c,
                     "_score": score,
+                    "_from_vector": True,
                 }
 
         for pos, chunk in enumerate(entity_chunks):
-            cid = chunk.get("chunk_id") or chunk.get("id")
-            if not cid:
+            c = _cid(chunk)
+            if not c:
                 continue
-            freq = chunk_tracking.get(cid, {}).get("frequency", 1)
-            score = (1.0 / (pos + 1)) * freq
-            prev = scored.get(cid)
+            score = entity_weight * _rr_pos(pos, 2) * _freq_bonus(c)
+            prev = scored.get(c)
             if prev is None:
-                scored[cid] = {
+                scored[c] = {
                     "content": chunk["content"],
-                    "file_path": chunk.get(
-                        "file_path", "unknown_source"
-                    ),
-                    "chunk_id": cid,
-                    "_score": score,
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "chunk_id": c,
+                    "_score": score * graph_only_penalty,
+                    "_from_vector": False,
                 }
             else:
-                prev["_score"] += score
+                boost = (
+                    vector_confirm_boost if prev.get("_from_vector") else 1.0
+                )
+                prev["_score"] += score * boost
 
         for pos, chunk in enumerate(relation_chunks):
-            cid = chunk.get("chunk_id") or chunk.get("id")
-            if not cid:
+            c = _cid(chunk)
+            if not c:
                 continue
-            freq = chunk_tracking.get(cid, {}).get("frequency", 1)
-            score = (1.0 / (pos + 1)) * freq * 0.8
-            prev = scored.get(cid)
+            score = relation_weight * _rr_pos(pos, 3) * _freq_bonus(c)
+            prev = scored.get(c)
             if prev is None:
-                scored[cid] = {
+                scored[c] = {
                     "content": chunk["content"],
-                    "file_path": chunk.get(
-                        "file_path", "unknown_source"
-                    ),
-                    "chunk_id": cid,
-                    "_score": score,
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "chunk_id": c,
+                    "_score": score * graph_only_penalty,
+                    "_from_vector": False,
                 }
             else:
-                prev["_score"] += score
+                boost = (
+                    vector_confirm_boost if prev.get("_from_vector") else 1.0
+                )
+                prev["_score"] += score * boost
 
         merged = sorted(scored.values(), key=lambda x: -x["_score"])
         origin_len = (
@@ -607,19 +853,20 @@ def _patch_merge_chunks():
         )
         for item in merged:
             item.pop("_score", None)
+            item.pop("_from_vector", None)
 
         logger.info(
-            "Score-based merged chunks: %d -> %d "
-            "(deduplicated %d)",
+            "Score merge '%s': %d -> %d (dedup %d)",
+            merge_preset,
             origin_len,
             len(merged),
             origin_len - len(merged),
         )
         return merged
 
-    operate_mod._merge_all_chunks = _score_based_merge
+    operate_mod._merge_all_chunks = _universal_merge
     _CHUNK_MERGE_PATCHED = True
-    logger.info("LightRAG _merge_all_chunks patched: score-based merge")
+    logger.info("LightRAG _merge_all_chunks patched: universal merge")
 
 
 def _extract_file_paths_from_search_data(

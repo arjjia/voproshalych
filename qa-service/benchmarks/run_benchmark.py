@@ -1,10 +1,10 @@
-"""CLI-скрипт для запуска chunk-level бенчмарка v2 (LightRAG).
+"""CLI-скрипт для запуска URL-level бенчмарка v2 (LightRAG).
 
 Вычисляет метрики качества поиска HitRate@K, MRR, NDCG@K,
 Recall@K, Precision@K на синтетическом датасете и сохраняет
 результаты в JSON.
 
-Оценка проводится на уровне chunk_id (не URL).
+Оценка проводится на уровне URL документа (не chunk_id).
 
 Поддерживаемые режимы поиска (param --search-mode):
 - naive: чистый векторный поиск (аналог v1, без графа)
@@ -44,21 +44,53 @@ def _load_dataset(path: str) -> List[Dict]:
     return dataset
 
 
-def _extract_ground_truth_chunk_ids(item: Dict) -> Set[str]:
-    """Извлечь ground truth chunk_id из записи датасета."""
-    chunk_ids: Set[str] = set()
+def _build_chunk_to_url_map(dataset: List[Dict]) -> Dict[str, str]:
+    """Построить маппинг chunk_id -> confluence_url из датасета."""
+    mapping: Dict[str, str] = {}
+    for item in dataset:
+        cid = str(item.get("chunk_id", "")).strip()
+        url = str(item.get("confluence_url", "")).strip()
+        if cid and url:
+            mapping[cid] = url
+    return mapping
 
+
+def _extract_ground_truth_urls(
+    item: Dict,
+    chunk_to_url: Dict[str, str],
+) -> Set[str]:
+    """Извлечь ground truth URL из записи датасета."""
+    urls: Set[str] = set()
+
+    primary_url = str(item.get("confluence_url", "")).strip()
+    if primary_url:
+        urls.add(primary_url)
+
+    relevant_urls = item.get("relevant_urls")
+    if isinstance(relevant_urls, list):
+        for url in relevant_urls:
+            if isinstance(url, str) and url.strip():
+                urls.add(url.strip())
+
+    if urls:
+        return urls
+
+    chunk_ids: Set[str] = set()
     chunk_id = item.get("chunk_id")
     if chunk_id is not None:
         chunk_ids.add(str(chunk_id).strip())
 
-    relevant = item.get("relevant_chunk_ids")
-    if isinstance(relevant, list):
-        for cid in relevant:
+    relevant_chunk_ids = item.get("relevant_chunk_ids")
+    if isinstance(relevant_chunk_ids, list):
+        for cid in relevant_chunk_ids:
             if cid is not None:
                 chunk_ids.add(str(cid).strip())
 
-    return {cid for cid in chunk_ids if cid}
+    for cid in chunk_ids:
+        if cid in chunk_to_url:
+            urls.add(chunk_to_url[cid])
+
+    return {u for u in urls if u}
 
 
 async def run_benchmark(
@@ -69,7 +101,7 @@ async def run_benchmark(
     use_query_expansion: bool = False,
     delay_between_queries: float = 1.0,
 ) -> Dict:
-    """Запустить chunk-level бенчмарк v2.
+    """Запустить URL-level бенчмарк v2.
 
     Args:
         dataset: Список записей из синтетического датасета
@@ -86,6 +118,7 @@ async def run_benchmark(
     from qa.lightrag_adapter import (
         create_lightrag_instance,
         extract_chunk_ids_from_search_data,
+        extract_urls_from_search_data,
     )
 
     from benchmarks.metrics import (
@@ -102,6 +135,7 @@ async def run_benchmark(
         logger.info("COSINE_THRESHOLD переопределён: %s", cosine_threshold)
 
     rag = await create_lightrag_instance()
+    chunk_to_url = _build_chunk_to_url_map(dataset)
 
     per_query_metrics: List[Dict[str, float]] = []
     per_query_details: List[Dict] = []
@@ -109,7 +143,7 @@ async def run_benchmark(
     total = len(dataset)
 
     logger.info(
-        "Запуск chunk-level бенчмарка: %d запросов, top_k=%d, "
+        "Запуск URL-level бенчмарка: %d запросов, top_k=%d, "
         "mode=%s, cosine_threshold=%s, query_expansion=%s",
         total,
         top_k,
@@ -120,12 +154,12 @@ async def run_benchmark(
 
     for idx, item in enumerate(dataset):
         question = item["question"]
-        ground_truth = _extract_ground_truth_chunk_ids(item)
+        ground_truth = _extract_ground_truth_urls(item, chunk_to_url)
         item_id = item.get("id", str(idx))
 
         if not ground_truth:
             logger.warning(
-                "[%d/%d] %s: нет ground truth chunk_id, пропуск",
+                "[%d/%d] %s: нет ground truth URL, пропуск",
                 idx + 1,
                 total,
                 item_id,
@@ -162,6 +196,7 @@ async def run_benchmark(
                 mode=search_mode,
                 top_k=top_k,
                 only_need_context=True,
+                enable_rerank=False,
             )
 
             t0 = time.time()
@@ -171,8 +206,29 @@ async def run_benchmark(
             retrieved_chunk_ids = extract_chunk_ids_from_search_data(
                 search_data, top_k
             )
+            retrieved_urls: List[str] = []
+            seen_urls: Set[str] = set()
+
+            for cid in retrieved_chunk_ids:
+                url = chunk_to_url.get(str(cid).strip())
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                retrieved_urls.append(url)
+                if len(retrieved_urls) >= top_k:
+                    break
+
+            if len(retrieved_urls) < top_k:
+                for url in extract_urls_from_search_data(search_data, top_k):
+                    if url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    retrieved_urls.append(url)
+                    if len(retrieved_urls) >= top_k:
+                        break
+
             q_metrics = compute_per_query_metrics(
-                retrieved_chunk_ids, ground_truth
+                retrieved_urls, ground_truth
             )
             per_query_metrics.append(q_metrics)
 
@@ -182,7 +238,8 @@ async def run_benchmark(
                     "question": question,
                     "search_query": search_query,
                     "confluence_url": item.get("confluence_url"),
-                    "ground_truth_chunk_ids": sorted(ground_truth),
+                    "ground_truth_urls": sorted(ground_truth),
+                    "retrieved_urls": retrieved_urls,
                     "retrieved_chunk_ids": retrieved_chunk_ids,
                     "metrics": {k: round(v, 4) for k, v in q_metrics.items()},
                     "search_time_sec": round(elapsed, 2),
@@ -191,13 +248,13 @@ async def run_benchmark(
 
             logger.info(
                 "[%d/%d] MRR=%.3f HR@5=%d recall@5=%.3f "
-                "chunks=%d time=%.1fs '%s'",
+                "urls=%d time=%.1fs '%s'",
                 idx + 1,
                 total,
                 q_metrics["mrr"],
                 int(q_metrics["hit_rate@5"]),
                 q_metrics["recall@5"],
-                len(retrieved_chunk_ids),
+                len(retrieved_urls),
                 elapsed,
                 question[:50],
             )
@@ -244,7 +301,7 @@ async def run_benchmark(
                 "COSINE_THRESHOLD", "0.2"
             ),
             "query_expansion": use_query_expansion,
-            "evaluation_level": "chunk_id",
+            "evaluation_level": "url",
             "embedding_model": os.getenv(
                 "LIGHT_RAG_MODEL_NAME",
                 "nizamovtimur-multilingual-e5-large-wikiutmn",
@@ -291,7 +348,7 @@ def print_summary(result: Dict) -> None:
 
     print("\n" + "=" * 70)
     print(
-        f"V2 (LightRAG) CHUNK-LEVEL BENCHMARK — N={meta['evaluated_queries']}"
+        f"V2 (LightRAG) URL-LEVEL BENCHMARK — N={meta['evaluated_queries']}"
     )
     print(
         f"mode={meta['search_mode']} top_k={meta['top_k']} "
@@ -334,7 +391,7 @@ def main():
     )
     parser = argparse.ArgumentParser(
         description=(
-            "Бенчмарк v2 (LightRAG) — chunk-level "
+            "Бенчмарк v2 (LightRAG) — URL-level "
             "метрики качества поиска"
         )
     )

@@ -171,20 +171,20 @@ METRIC_NAMES = [
 ]
 
 V1_BASELINE: Dict[str, float] = {
-    "hit_rate@1": 0.3465,
-    "hit_rate@5": 0.6634,
-    "hit_rate@10": 0.7871,
-    "mrr": 0.5945,
-    "recall@1": 0.4307,
-    "recall@3": 0.7079,
-    "recall@5": 0.8317,
+    "hit_rate@1": 0.4802,
+    "hit_rate@5": 0.8713,
+    "hit_rate@10": 0.9307,
+    "mrr": 0.6402,
+    "recall@1": 0.4802,
+    "recall@3": 0.7723,
+    "recall@5": 0.8713,
     "recall@10": 0.9307,
-    "precision@1": 0.4307,
-    "precision@3": 0.2360,
-    "precision@5": 0.1663,
+    "precision@1": 0.4802,
+    "precision@3": 0.2574,
+    "precision@5": 0.1743,
     "precision@10": 0.0931,
-    "ndcg@5": 0.8681,
-    "ndcg@10": 0.8681,
+    "ndcg@5": 0.6916,
+    "ndcg@10": 0.7115,
 }
 
 
