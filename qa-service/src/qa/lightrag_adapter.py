@@ -707,6 +707,99 @@ def _patch_merge_chunks():
             )
             return merged
 
+        if merge_preset == "adaptive_hybrid":
+            ah_threshold = float(
+                os.getenv("ADAPTIVE_HYBRID_THRESHOLD", "0.4")
+            )
+            ah_graph_weight = float(
+                os.getenv("ADAPTIVE_HYBRID_GRAPH_WEIGHT", "0.7")
+            )
+            rrf_k = int(os.getenv("RRF_K", "60"))
+
+            use_rrf = True
+
+            if vector_chunks and query_embedding is not None:
+                try:
+                    top1_content = vector_chunks[0].get("content", "")[:500]
+                    emb_func = getattr(text_chunks_db, "embedding_func", None)
+                    if top1_content and emb_func:
+                        chunk_embs = await emb_func([top1_content])
+                        chunk_emb = np.array(chunk_embs[0])
+                        q_emb = np.array(query_embedding)
+                        cos_sim = float(
+                            np.dot(q_emb, chunk_emb)
+                            / (
+                                np.linalg.norm(q_emb)
+                                * np.linalg.norm(chunk_emb)
+                                + 1e-10
+                            )
+                        )
+                        if cos_sim >= ah_threshold:
+                            use_rrf = False
+                            logger.info(
+                                "AdaptiveHybrid: confident (cos=%.4f>=%.2f), "
+                                "vector-only (%d)",
+                                cos_sim,
+                                ah_threshold,
+                                len(vector_chunks),
+                            )
+                        else:
+                            logger.info(
+                                "AdaptiveHybrid: uncertain (cos=%.4f<%.2f), "
+                                "weighted RRF (graph_w=%.2f)",
+                                cos_sim,
+                                ah_threshold,
+                                ah_graph_weight,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        "AdaptiveHybrid: cosine check failed: %s", e
+                    )
+
+            if not use_rrf:
+                merged = [
+                    _res(c, _cid(c)) for c in vector_chunks if _cid(c)
+                ]
+                return merged
+
+            vec_w = 1.0 - ah_graph_weight
+            graph_w = ah_graph_weight / 2.0
+            scored: dict[str, dict] = {}
+            for rank, chunk in enumerate(vector_chunks):
+                c = _cid(chunk)
+                if not c:
+                    continue
+                if c not in scored:
+                    scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
+                scored[c]["_s"] += vec_w / (rrf_k + rank + 1)
+
+            for rank, chunk in enumerate(entity_chunks):
+                c = _cid(chunk)
+                if not c:
+                    continue
+                if c not in scored:
+                    scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
+                scored[c]["_s"] += graph_w / (rrf_k + rank + 1)
+
+            for rank, chunk in enumerate(relation_chunks):
+                c = _cid(chunk)
+                if not c:
+                    continue
+                if c not in scored:
+                    scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
+                scored[c]["_s"] += graph_w / (rrf_k + rank + 1)
+
+            merged = sorted(scored.values(), key=lambda x: -x["_s"])
+            result = [item["_r"] for item in merged]
+            logger.info(
+                "AdaptiveHybrid: weighted RRF %d+%d+%d -> %d",
+                len(vector_chunks),
+                len(entity_chunks),
+                len(relation_chunks),
+                len(result),
+            )
+            return result
+
         preset_values = {
             "score_tuned": {
                 "MERGE_W_VECTOR": "1.0",

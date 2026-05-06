@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -33,6 +34,20 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _normalize_url(url: str) -> str:
+    m = re.search(r'pageId=(\d+)', url)
+    if m:
+        return f"page:{m.group(1)}"
+    m = re.search(r'attachments/(\d+)', url)
+    if m:
+        return f"page:{m.group(1)}"
+    return url.strip()
+
+
+def _normalize_urls(urls: List[str]) -> List[str]:
+    return [_normalize_url(u) for u in urls]
 
 
 def _load_dataset(path: str) -> List[Dict]:
@@ -69,7 +84,7 @@ def _extract_ground_truth_urls(
     relevant_urls = item.get("relevant_urls")
     if isinstance(relevant_urls, list):
         for url in relevant_urls:
-            if isinstance(url, str) and url.strip():
+            if isinstance(url, str) and url.strip() and url.strip().startswith("http"):
                 urls.add(url.strip())
 
     if urls:
@@ -228,7 +243,7 @@ async def run_benchmark(
                         break
 
             q_metrics = compute_per_query_metrics(
-                retrieved_urls, ground_truth
+                _normalize_urls(retrieved_urls), {_normalize_url(u) for u in ground_truth}
             )
             per_query_metrics.append(q_metrics)
 
