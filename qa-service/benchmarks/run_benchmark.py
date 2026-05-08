@@ -187,6 +187,7 @@ async def run_benchmark(
             elapsed = time.time() - t0
 
             if use_reranker:
+                os.environ["RERANKER_ENABLED"] = "true"
                 from qa.kb.reranker import rerank_chunks as _rerank
 
                 chunks = search_data.get("data", {}).get("chunks", [])

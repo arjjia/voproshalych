@@ -1,20 +1,26 @@
-"""Скачивает и кэширует модели для эмбеддингов при сборке Docker."""
+"""Скачивает и кэширует модели при сборке Docker."""
 
 import os
 
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 EMBEDDING_MODEL = "deepvk/USER-bge-m3"
+RERANKER_MODEL = "DiTy/cross-encoder-russian-msmarco"
 
 
 def main() -> None:
-    """Скачивает модель эмбеддингов в локальный кэш HuggingFace."""
     hf_token = os.getenv("HF_TOKEN")
-    print(f"Downloading embedding model: {EMBEDDING_MODEL}")
     print(f"Using HuggingFace token: {'yes' if hf_token else 'no (anonymous)'}")
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    print(f"Model downloaded: {EMBEDDING_MODEL}")
-    print(f"Embedding dimension: {model.get_sentence_embedding_dimension()}")
+
+    print(f"Downloading embedding model: {EMBEDDING_MODEL}")
+    emb = SentenceTransformer(EMBEDDING_MODEL)
+    print(f"Embedding dim: {emb.get_sentence_embedding_dimension()}")
+
+    print(f"Downloading reranker model: {RERANKER_MODEL}")
+    reranker = CrossEncoder(RERANKER_MODEL, max_length=512)
+    print(f"Reranker max_length: {reranker.max_length}")
+
+    print("All models downloaded and cached.")
 
 
 if __name__ == "__main__":
