@@ -334,6 +334,13 @@ async def _handle_kb_question(
         )
         t2_elapsed = time.time() - t2_start
 
+        from ...kb.reranker import rerank_chunks
+
+        chunks = search_data.get("data", {}).get("chunks", [])
+        if chunks:
+            reranked = rerank_chunks(search_query, chunks, top_k=8)
+            search_data["data"]["chunks"] = reranked
+
         search_context, source_index = _format_search_context(search_data)
         sources = _extract_sources_from_data(search_data)
         keywords = _extract_keywords_from_data(search_data)

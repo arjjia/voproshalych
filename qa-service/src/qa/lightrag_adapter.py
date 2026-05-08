@@ -1025,30 +1025,34 @@ def extract_urls_from_search_data(
 def extract_chunk_ids_from_search_data(
     search_data: dict,
     top_k: int = 10,
-    prefix: str = "dataset_chunk:",
 ) -> list[str]:
-    """Извлечь chunk_id из file_path результата aquery_data LightRAG.
+    """Извлечь chunk_id из результата aquery_data LightRAG.
 
-    Ожидается, что при импорте chunk_id сохранялся в file_path
-    в формате ``dataset_chunk:<id>``.
+    Каждый chunk в ответе содержит поле ``chunk_id`` — используется
+    именно оно, а не file_path.
 
     Args:
         search_data: Результат rag.aquery_data()
         top_k: Максимум chunk_id для возврата
-        prefix: Префикс file_path с chunk_id
 
     Returns:
         Список chunk_id в порядке ранжирования
     """
-    file_paths = _extract_file_paths_from_search_data(search_data, top_k * 3)
-    chunk_ids: list[str] = []
+    if search_data.get("status") != "success":
+        return []
 
-    for fp in file_paths:
-        if fp.startswith(prefix):
-            chunk_id = fp[len(prefix) :].strip()
-            if chunk_id:
-                chunk_ids.append(chunk_id)
-                if len(chunk_ids) >= top_k:
-                    break
+    result_data = search_data.get("data", {})
+    chunks = result_data.get("chunks", [])
+
+    chunk_ids: list[str] = []
+    seen: set[str] = set()
+
+    for chunk in chunks:
+        cid = chunk.get("chunk_id", "")
+        if cid and cid not in seen:
+            chunk_ids.append(cid)
+            seen.add(cid)
+            if len(chunk_ids) >= top_k:
+                break
 
     return chunk_ids
