@@ -4,11 +4,27 @@ import logging
 import re
 
 from config import settings
+from messages import (
+    ANSWER_FAILED,
+    DIALOG_RESET,
+    FEEDBACK_ALREADY_RATED,
+    FEEDBACK_DISLIKE,
+    FEEDBACK_LIKE,
+    GREETING,
+    HELP_CONTACTS,
+    SERVICE_UNAVAILABLE,
+    SUBSCRIBED,
+    SUBSCRIPTION_ERROR,
+    UNSUBSCRIBED,
+    UNSUPPORTED_FORMAT,
+    UNKNOWN_COMMAND,
+    VOICE_STUB,
+)
 from models.callback import CallbackEvent
 from models.message import IncomingMessage
 from models.response import ActionType, BotResponse, InlineButton, KeyboardButton, OutgoingAction
 from services.dialog_service import DialogService
-from services.feedback_service import FeedbackService, FEEDBACK_LIKE, FEEDBACK_DISLIKE
+from services.feedback_service import FeedbackService, FEEDBACK_LIKE as FEEDBACK_LIKE_TYPE, FEEDBACK_DISLIKE as FEEDBACK_DISLIKE_TYPE
 from services.holiday_newsletter import HolidayNewsletterService
 from services.qa_service_client import QAServiceClient
 from services.user_service import UserService
@@ -28,6 +44,8 @@ class BotService:
         )
         self._dialog_service = DialogService()
         self._feedback_service = FeedbackService()
+        self._FEEDBACK_LIKE = FEEDBACK_LIKE_TYPE
+        self._FEEDBACK_DISLIKE = FEEDBACK_DISLIKE_TYPE
         self._holiday_newsletter_service = HolidayNewsletterService(
             qa_service_client=self._qa_service_client
         )
@@ -68,7 +86,7 @@ class BotService:
                     actions=[
                         OutgoingAction(
                             type=ActionType.send_text,
-                            text="Не удалось изменить статус подписки.",
+                            text=SUBSCRIPTION_ERROR,
                         )
                     ]
                 )
@@ -77,11 +95,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text=(
-                            "Вы подписались на поздравления с праздниками!"
-                            if user.is_subscribed
-                            else "Вы отписались от поздравлений."
-                        ),
+                        text=SUBSCRIBED if user.is_subscribed else UNSUBSCRIBED,
                         buttons=self._build_start_buttons(user.is_subscribed),
                     )
                 ]
@@ -97,7 +111,7 @@ class BotService:
                     actions=[
                         OutgoingAction(
                             type=ActionType.send_text,
-                            text="Не удалось начать новый диалог.",
+                            text=SERVICE_UNAVAILABLE,
                         )
                     ]
                 )
@@ -108,7 +122,7 @@ class BotService:
                     actions=[
                         OutgoingAction(
                             type=ActionType.send_text,
-                            text="Не удалось начать новый диалог.",
+                            text=SERVICE_UNAVAILABLE,
                         )
                     ]
                 )
@@ -117,21 +131,30 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="История сброшена! Задавайте новый вопрос 🔄",
+                        text=DIALOG_RESET,
                     )
                 ]
             )
 
         if event.callback_data == "feedback:like":
             result = self._feedback_service.save_feedback(
-                event.platform.value, event.user_id, FEEDBACK_LIKE,
+                event.platform.value, event.user_id, self._FEEDBACK_LIKE,
             )
             if result == "already_rated":
                 return BotResponse(
                     actions=[
                         OutgoingAction(
                             type=ActionType.send_text,
-                            text="Вы уже оценили этот ответ.",
+                            text=FEEDBACK_ALREADY_RATED,
+                        )
+                    ]
+                )
+            if result is not None:
+                return BotResponse(
+                    actions=[
+                        OutgoingAction(
+                            type=ActionType.send_text,
+                            text=SERVICE_UNAVAILABLE,
                         )
                     ]
                 )
@@ -139,21 +162,30 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="Рад помочь! 😻",
+                        text=FEEDBACK_LIKE,
                     )
                 ]
             )
 
         if event.callback_data == "feedback:dislike":
             result = self._feedback_service.save_feedback(
-                event.platform.value, event.user_id, FEEDBACK_DISLIKE,
+                event.platform.value, event.user_id, self._FEEDBACK_DISLIKE,
             )
             if result == "already_rated":
                 return BotResponse(
                     actions=[
                         OutgoingAction(
                             type=ActionType.send_text,
-                            text="Вы уже оценили этот ответ.",
+                            text=FEEDBACK_ALREADY_RATED,
+                        )
+                    ]
+                )
+            if result is not None:
+                return BotResponse(
+                    actions=[
+                        OutgoingAction(
+                            type=ActionType.send_text,
+                            text=SERVICE_UNAVAILABLE,
                         )
                     ]
                 )
@@ -161,7 +193,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="Спасибо за обратную связь, постараюсь стать лучше! 🐱",
+                        text=FEEDBACK_DISLIKE,
                     )
                 ]
             )
@@ -210,7 +242,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="История сброшена! Задавайте новый вопрос 🔄",
+                        text=DIALOG_RESET,
                     )
                 ]
             )
@@ -228,11 +260,7 @@ class BotService:
                     actions=[
                         OutgoingAction(
                             type=ActionType.send_text,
-                            text=(
-                                "Вы подписались на поздравления с праздниками!"
-                                if toggled_user.is_subscribed
-                                else "Вы отписались от поздравлений."
-                            ),
+                            text=SUBSCRIBED if toggled_user.is_subscribed else UNSUBSCRIBED,
                         )
                     ]
                 )
@@ -240,7 +268,7 @@ class BotService:
                 actions=[
                     OutgoingAction(
                         type=ActionType.send_text,
-                        text="Не удалось изменить статус подписки.",
+                        text=SUBSCRIPTION_ERROR,
                     )
                 ]
             )
@@ -311,10 +339,7 @@ class BotService:
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
-                    text=(
-                        "Я получил голосовое сообщение. "
-                        "Скоро здесь будет распознавание речи."
-                    ),
+                    text=VOICE_STUB,
                 )
             ]
         )
@@ -332,13 +357,11 @@ class BotService:
             BotResponse: Сообщение о неподдерживаемом формате.
         """
 
-        reply_text = f"Формат сообщения {message.message_type} пока не поддерживается."
-
         return BotResponse(
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
-                    text=reply_text,
+                    text=UNSUPPORTED_FORMAT,
                 )
             ]
         )
@@ -354,10 +377,10 @@ class BotService:
             dict: Ответ с ключами answer, expanded_query, keywords, model, sources, question_type.
         """
         from services.qa_service_client import (
+            QAServiceError,
+            QAServiceRateLimited,
             QAServiceTimeout,
             QAServiceUnavailable,
-            QAServiceRateLimited,
-            QAServiceError,
         )
 
         try:
@@ -372,40 +395,12 @@ class BotService:
                 f"sources={len(result.get('sources', []))}"
             )
             return result
-        except QAServiceTimeout:
-            logger.error("QA service timeout")
-            return {"answer": (
-                "Не удалось быстро найти ответ. "
-                "Попробуйте переформулировать вопрос — "
-                "используйте простые термины и конкретные формулировки. "
-                "Если не поможет, повторите чуть позже."
-            )}
-        except QAServiceUnavailable:
-            logger.error("QA service unavailable")
-            return {"answer": (
-                "Сервис временно недоступен. "
-                "Мы уже работаем над устранением проблемы. "
-                "Попробуйте через пару минут."
-            )}
-        except QAServiceRateLimited:
-            logger.error("QA service rate limited")
-            return {"answer": (
-                "Сервис сейчас перегружен запросами. "
-                "Попробуйте повторить вопрос чуть позже."
-            )}
-        except QAServiceError as e:
-            logger.error(f"QA service error: {e}")
-            return {"answer": (
-                "Не удалось сформировать ответ. "
-                "Попробуйте переформулировать вопрос — "
-                "используйте простые термины и конкретные формулировки."
-            )}
+        except (QAServiceTimeout, QAServiceUnavailable, QAServiceRateLimited, QAServiceError) as e:
+            logger.error(f"QA service error: {type(e).__name__}: {e}")
+            return {"answer": SERVICE_UNAVAILABLE}
         except Exception as e:
             logger.error(f"Unexpected QA error: {e}")
-            return {"answer": (
-                "Что-то пошло не так. "
-                "Попробуйте повторить запрос позже или переформулировать вопрос."
-            )}
+            return {"answer": ANSWER_FAILED}
 
     def _format_qa_answer(self, qa_result: dict) -> str:
         """Форматирует ответ QA для отправки в мессенджер.
@@ -466,7 +461,7 @@ class BotService:
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
-                    text="Эта команда пока не поддерживается.",
+                    text=UNKNOWN_COMMAND,
                 )
             ]
         )
@@ -489,25 +484,7 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     parse_mode="HTML",
-                    text=(
-                        "Привет! 👋🏻 Я бот-помощник Вопрошалыч.\n\n"
-                        "Я отвечаю на вопросы об обучении в ТюмГУ — "
-                        "расписание, стипендии, общежития, документы, "
-                        "карты доступа и многое другое.\n\n"
-                        "Источники информации:\n"
-                        "• <a href=\"https://utmn.ru\">Официальный сайт ТюмГУ</a>\n"
-                        "• <a href=\"https://sveden.utmn.ru\">Сведения об образовательной организации</a>\n"
-                        "• <a href=\"https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500\">Инструкции для ИС ТюмГУ</a>\n"
-                        "• <a href=\"https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972\">Руководства для обучающихся</a>\n\n"
-                        "Кнопка «Начать новый диалог» сбрасывает историю общения — "
-                        "я начну отвечать без учёта предыдущих вопросов.\n\n"
-                        "Подписка на поздравления с праздниками доступна "
-                        "через кнопку ниже!\n\n"
-                        "Ответы формируются с помощью искусственного интеллекта "
-                        "и могут содержать неточности. Продолжая работу с ботом, "
-                        "вы даёте согласие на обработку персональных данных "
-                        "и получение сообщений."
-                    ),
+                    text=GREETING,
                     buttons=self._build_start_buttons(is_subscribed),
                     reply_keyboard=self._build_main_keyboard(),
                 )
@@ -525,20 +502,7 @@ class BotService:
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
-                    text=(
-                        "📋 Контакты:\n\n"
-                        "Единый деканат:\n"
-                        "г. Тюмень, ул. Ленина, 16\n"
-                        "Тел.: 8 (3452) 59-74-29\n"
-                        "Email: ed@utmn.ru\n\n"
-                        "Приёмная комиссия:\n"
-                        "Тел.: 8-800-700-05-53\n"
-                        "Email: 597759@utmn.ru\n\n"
-                        "Техподдержка Вопрошалыча:\n"
-                        "Email: stud0000122686@utmn.ru\n\n"
-                        "Также вы можете задать вопрос прямо здесь — "
-                        "я отвечу на основе базы знаний ТюмГУ."
-                    ),
+                    text=HELP_CONTACTS,
                 )
             ]
         )

@@ -30,6 +30,13 @@ from aiogram.types import (
 
 logging.basicConfig(level=logging.INFO)
 
+_MSG_SERVICE_UNAVAILABLE = "Сервис временно недоступен. Попробуйте позже."
+_MSG_ANSWER_FAILED = "Не удалось получить ответ. Попробуйте повторить вопрос."
+_MSG_PENDING = "Сейчас я попробую ответить на этот вопрос, это может занять какое-то время..."
+
+
+logging.basicConfig(level=logging.INFO)
+
 
 @dataclass(slots=True)
 class Settings:
@@ -158,7 +165,7 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
 
         pending_message: Message | None = None
         if should_show_pending_message(message):
-            pending_message = await message.answer("Сейчас я попробую ответить на этот вопрос, это может занять какое-то время...")
+            pending_message = await message.answer(_MSG_PENDING)
 
         try:
             bot_response = await core_client.process_message(message)
@@ -168,42 +175,17 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
                 f"HTTP error from core: {status_code} - {e.response.text[:200]}"
             )
             await delete_message_safely(pending_message)
-
-            if status_code == 503:
-                await message.answer(
-                    "Сервис временно недоступен. "
-                    "Пожалуйста, попробуйте через несколько минут."
-                )
-            elif status_code >= 500:
-                await message.answer(
-                    "Произошла внутренняя ошибка сервиса. "
-                    "Мы уже работаем над её устранением."
-                )
-            else:
-                await message.answer(
-                    "Не удалось обработать запрос. Попробуйте переформулировать вопрос."
-                )
+            await message.answer(_MSG_SERVICE_UNAVAILABLE)
             return
-        except httpx.TimeoutException:
-            logging.error("Timeout connecting to core service")
+        except (httpx.TimeoutException, httpx.ConnectError):
+            logging.exception("Failed to connect to core service")
             await delete_message_safely(pending_message)
-            await message.answer(
-                "Поиск ответа занимает слишком долго. "
-                "Попробуйте переформулировать вопрос."
-            )
-            return
-        except httpx.ConnectError:
-            logging.error("Cannot connect to core service")
-            await delete_message_safely(pending_message)
-            await message.answer(
-                "Не удалось подключиться к сервису. "
-                "Проверьте подключение и попробуйте позже."
-            )
+            await message.answer(_MSG_SERVICE_UNAVAILABLE)
             return
         except httpx.HTTPError:
             logging.exception("Failed to process Telegram message via core")
             await delete_message_safely(pending_message)
-            await message.answer("Что-то пошло не так. Пожалуйста, попробуйте ещё раз.")
+            await message.answer(_MSG_ANSWER_FAILED)
             return
 
         await delete_message_safely(pending_message)
@@ -235,21 +217,15 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
                             )
                         except TelegramBadRequest:
                             await message.answer(
-                                "Ответ слишком длинный. "
-                                "Попробуйте переформулировать вопрос.",
+                                _MSG_ANSWER_FAILED,
                                 reply_markup=reply_keyboard,
                             )
                     else:
                         logging.error(f"Telegram bad request: {exc}")
-                        await message.answer(
-                            "Не удалось отправить ответ. "
-                            "Попробуйте переформулировать вопрос.",
-                        )
+                        await message.answer(_MSG_ANSWER_FAILED)
                 except Exception:
                     logging.exception("Failed to send Telegram message")
-                    await message.answer(
-                        "Что-то пошло не так. Попробуйте ещё раз."
-                    )
+                    await message.answer(_MSG_ANSWER_FAILED)
 
     @dispatcher.callback_query()
     async def handle_callback(callback: CallbackQuery) -> None:
@@ -262,15 +238,15 @@ def build_dispatcher(core_client: CoreClient) -> Dispatcher:
             bot_response = await core_client.process_callback(callback)
         except httpx.HTTPStatusError as e:
             logging.error(f"HTTP error from core: {e.response.status_code}")
-            await callback.answer("Сервис временно недоступен.")
+            await callback.answer(_MSG_SERVICE_UNAVAILABLE)
             return
         except httpx.TimeoutException:
             logging.error("Timeout connecting to core service")
-            await callback.answer("Сервис временно недоступен.")
+            await callback.answer(_MSG_SERVICE_UNAVAILABLE)
             return
         except httpx.HTTPError:
             logging.exception("Failed to process Telegram callback via core")
-            await callback.answer("Сервис временно недоступен.")
+            await callback.answer(_MSG_SERVICE_UNAVAILABLE)
             return
 
         for action in bot_response.get("actions", []):

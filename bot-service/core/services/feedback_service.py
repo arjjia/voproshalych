@@ -39,13 +39,14 @@ class FeedbackService:
 
         Returns:
             None — оценка сохранена/обновлена.
-            str — сообщение об ошибке или «уже оценено».
+            "already_rated" — повторная оценка того же типа.
+            "error" — внутренняя ошибка (пользователь/сессия/ответ не найдены).
         """
         session = get_session()
         try:
             user = self._user_service.get_user(platform, platform_user_id)
             if user is None:
-                return "Пользователь не найден."
+                return "error"
 
             active_session = (
                 session.query(DialogSession)
@@ -57,7 +58,7 @@ class FeedbackService:
                 .first()
             )
             if active_session is None:
-                return "Активный диалог не найден."
+                return "error"
 
             last_answer = (
                 session.query(DialogMessage)
@@ -69,7 +70,7 @@ class FeedbackService:
                 .first()
             )
             if last_answer is None:
-                return "Ответ не найден."
+                return "error"
 
             if last_answer.feedback == feedback_type:
                 return "already_rated"
@@ -80,6 +81,6 @@ class FeedbackService:
         except Exception:
             session.rollback()
             logger.exception("Failed to save feedback")
-            return "Не удалось сохранить оценку."
+            return "error"
         finally:
             session.close()

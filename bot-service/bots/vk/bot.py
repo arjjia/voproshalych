@@ -23,6 +23,12 @@ from vkbottle.bot import Bot, Message
 
 logging.basicConfig(level=logging.INFO)
 
+_MSG_SERVICE_UNAVAILABLE = "Сервис временно недоступен. Попробуйте позже."
+_MSG_PENDING = "Сейчас я попробую ответить на этот вопрос, это может занять какое-то время..."
+
+
+logging.basicConfig(level=logging.INFO)
+
 
 @dataclass(slots=True)
 class Settings:
@@ -150,7 +156,7 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
         except httpx.HTTPError:
             logging.exception("Не удалось обработать сообщение VK через core")
             await delete_pending_message(bot, pending_message_id)
-            await message.answer("Сервис временно недоступен.")
+            await message.answer(_MSG_SERVICE_UNAVAILABLE)
             return
 
         await delete_pending_message(bot, pending_message_id)
@@ -194,11 +200,11 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
             bot_response = await core_client.process_callback(event)
         except httpx.HTTPStatusError:
             logging.exception("HTTP error from core VK callback")
-            await _show_snackbar(bot, event_id, user_id, peer_id, "Сервис временно недоступен.")
+            await _show_snackbar(bot, event_id, user_id, peer_id, _MSG_SERVICE_UNAVAILABLE)
             return
         except httpx.HTTPError:
             logging.exception("Не удалось обработать callback VK через core")
-            await _show_snackbar(bot, event_id, user_id, peer_id, "Сервис временно недоступен.")
+            await _show_snackbar(bot, event_id, user_id, peer_id, _MSG_SERVICE_UNAVAILABLE)
             return
 
         snackbar_text = next(
@@ -207,7 +213,7 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
                 for action in bot_response.get("actions", [])
                 if action.get("text")
             ),
-            "Готово",
+            "",
         )
 
         await _show_snackbar(bot, event_id, user_id, peer_id, snackbar_text[:90])
@@ -451,7 +457,7 @@ async def send_pending_message(bot: Bot, message: Message) -> int | None:
         return await bot.api.messages.send(
             peer_id=message.peer_id,
             random_id=random.randint(1, 2_147_483_647),
-            message="Сейчас я попробую ответить на этот вопрос, это может занять какое-то время...",
+            message=_MSG_PENDING,
         )
     except Exception:
         logging.exception("Не удалось отправить временное сообщение VK")

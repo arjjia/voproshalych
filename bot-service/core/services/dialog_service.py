@@ -124,6 +124,9 @@ class DialogService:
                 lines.insert(0, line)
                 total_chars += len(line) + 1
             return "\n".join(lines)
+        except Exception:
+            session.rollback()
+            return ""
         finally:
             session.close()
 

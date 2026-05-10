@@ -31,7 +31,7 @@ async def download_document(request: DocumentRequest) -> DocumentResponse:
 
     try:
         if not is_lightrag_ready():
-            raise HTTPException(status_code=503, detail="LightRAG not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable")
 
         parsed = await _parser.parse(str(request.url))
         logger.info(f"Распарсен документ: {parsed.title}")

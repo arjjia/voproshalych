@@ -161,11 +161,11 @@ class QAServiceClient:
             logger.warning("QA service rate limited on %s", exc.request.url.path)
             return QAServiceRateLimited("QA service rate limited")
 
-        if status_code == 503:
+        if status_code in (503, 504):
             logger.warning("QA service unavailable on %s", exc.request.url.path)
             return QAServiceUnavailable("QA service is unavailable")
 
-        if status_code == 400:
+        if status_code in (400, 422):
             logger.error("QA service invalid request on %s", exc.request.url.path)
             return QAServiceError(f"Invalid request: {response_snippet}")
 

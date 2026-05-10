@@ -49,19 +49,23 @@ async def generate_holiday_greeting(
 
     try:
         response = await llm_pool.call(prompt=prompt)
+        if not response.content or not response.content.strip():
+            raise HTTPException(status_code=503, detail="No available LLM providers")
         return HolidayGreetingResponse(
             message=response.content.strip(),
             model=response.model,
         )
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.error(f"Holiday greeting generation failed: {exc}")
         raise HTTPException(
             status_code=503,
-            detail="Не удалось сгенерировать поздравление: нет доступных провайдеров.",
+            detail="No available LLM providers",
         ) from exc
     except Exception as exc:
         logger.error(f"Unexpected holiday greeting error: {exc}")
         raise HTTPException(
             status_code=500,
-            detail="Не удалось сгенерировать поздравление.",
+            detail="Holiday greeting generation failed",
         ) from exc

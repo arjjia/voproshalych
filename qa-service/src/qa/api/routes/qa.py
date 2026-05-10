@@ -45,6 +45,23 @@ def _get_timeouts() -> dict:
     }
 
 
+def _safe_process_response(raw_content: str) -> tuple[str, list[str]]:
+    """Обработать ответ LLM с проверкой на пустой результат.
+
+    Args:
+        raw_content: Сырой ответ от LLM.
+
+    Returns:
+        Кортеж (clean_answer, links).
+
+    Raises:
+        ValueError: Если ответ пустой.
+    """
+    if not raw_content or not raw_content.strip():
+        raise ValueError("LLM returned empty response")
+    return process_llm_response(raw_content)
+
+
 def _format_search_context(data: dict) -> tuple[str, dict[str, str]]:
     """Преобразовать результат aquery_data в текстовый контекст для LLM.
 
@@ -201,7 +218,7 @@ async def ask_question(
     )
 
     if not is_lightrag_ready():
-        raise HTTPException(status_code=503, detail="LightRAG not initialized")
+        raise HTTPException(status_code=503, detail="Service unavailable")
 
     try:
         async with asyncio.timeout(timeouts["total"]):
@@ -272,30 +289,12 @@ async def ask_question(
     except asyncio.TimeoutError:
         total_elapsed = time.time() - start_time
         logger.error(f"[{req_id}] TIMEOUT after {total_elapsed:.1f}s")
-        return QAResponse(
-            answer=(
-                "Не удалось быстро найти ответ. "
-                "Попробуйте переформулировать вопрос — "
-                "используйте простые термины и конкретные формулировки. "
-                "Если не поможет, повторите чуть позже."
-            ),
-            model="timeout-fallback",
-            question_type=1,
-        )
+        raise HTTPException(status_code=504, detail="QA pipeline timeout")
 
     except Exception as e:
         total_elapsed = time.time() - start_time
         logger.error(f"[{req_id}] FAILED after {total_elapsed:.1f}s: {e}")
-        return QAResponse(
-            answer=(
-                "Не удалось сформировать ответ. "
-                "Попробуйте переформулировать вопрос — "
-                "используйте простые термины и конкретные формулировки. "
-                "Если не поможет, повторите позже."
-            ),
-            model="error-fallback",
-            question_type=1,
-        )
+        raise HTTPException(status_code=500, detail=f"QA pipeline error: {e}")
 
 
 async def _handle_kb_question(
@@ -379,7 +378,7 @@ async def _handle_kb_question(
         )
         t3_elapsed = time.time() - t2_start
 
-        clean_answer, _ = process_llm_response(response.content)
+        clean_answer, _ = _safe_process_response(response.content)
 
         logger.info(
             f"[{req_id}] Phase 2 DONE (no KB context): "
@@ -427,7 +426,7 @@ async def _handle_kb_question(
     )
 
     # ── Phase 3: Post-processing ──
-    clean_answer, answer_links = process_llm_response(raw_answer)
+    clean_answer, answer_links = _safe_process_response(raw_answer)
 
     used_sources = _filter_used_sources(raw_answer, sources, source_index)
 
