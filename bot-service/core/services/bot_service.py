@@ -309,7 +309,6 @@ class BotService:
 
         history = self._dialog_service.build_context(
             session_id=dialog_session.id,
-            max_chars=settings.dialog_context_max_chars,
         )
         qa_result = self._ask_qa_service(
             question=question,
@@ -322,6 +321,8 @@ class BotService:
             expanded_query=qa_result.get("expanded_query"),
             keywords=qa_result.get("keywords"),
             model_used=qa_result.get("model"),
+            question_type=qa_result.get("question_type"),
+            normalized_context=qa_result.get("context_expanded_query"),
         )
         return self._format_qa_answer(qa_result)
 

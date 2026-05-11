@@ -223,10 +223,16 @@ async def ask_question(
     try:
         async with asyncio.timeout(timeouts["total"]):
             classification = await classify_and_expand(
-                request.question, request_id=req_id
+                request.question,
+                request_id=req_id,
+                dialog_context=request.context,
             )
             question_type = classification.question_type
-            search_query = classification.expanded_query or request.question
+            search_query = (
+                classification.context_expanded_query
+                or classification.expanded_query
+                or request.question
+            )
 
             if len(search_query) > 1500:
                 search_query = search_query[:1500]
@@ -256,6 +262,7 @@ async def ask_question(
                 result = await _handle_system_question(
                     req_id,
                     request.question,
+                    request.context,
                     llm_pool,
                     config,
                     timeouts,
@@ -265,6 +272,7 @@ async def ask_question(
                 result = await _handle_general_question(
                     req_id,
                     request.question,
+                    request.context,
                     llm_pool,
                     config,
                     timeouts,
@@ -273,6 +281,7 @@ async def ask_question(
 
             result.expanded_query = classification.expanded_query
             result.question_type = question_type
+            result.context_expanded_query = classification.context_expanded_query
 
             total_elapsed = time.time() - start_time
             logger.info(
@@ -459,6 +468,7 @@ async def _handle_kb_question(
 async def _handle_system_question(
     req_id: str,
     question: str,
+    dialog_context: str | None,
     llm_pool,
     config,
     timeouts: dict,
@@ -467,10 +477,13 @@ async def _handle_system_question(
     """Обработка вопроса о системе/боте."""
     t2_start = time.time()
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT_ABOUT_BOT},
-        {"role": "user", "content": question},
-    ]
+    messages = build_messages(
+        system_prompt=SYSTEM_PROMPT_ABOUT_BOT,
+        question=question,
+        search_context=None,
+        dialog_context=dialog_context,
+        dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
+    )
 
     logger.info(f"[{req_id}] Phase 2 START: system question, no search")
 
@@ -497,6 +510,7 @@ async def _handle_system_question(
 async def _handle_general_question(
     req_id: str,
     question: str,
+    dialog_context: str | None,
     llm_pool,
     config,
     timeouts: dict,
@@ -505,10 +519,13 @@ async def _handle_general_question(
     """Обработка общего вопроса (приветствие, поболтать)."""
     t2_start = time.time()
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
+    messages = build_messages(
+        system_prompt=SYSTEM_PROMPT,
+        question=question,
+        search_context=None,
+        dialog_context=dialog_context,
+        dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
+    )
 
     logger.info(f"[{req_id}] Phase 2 START: general question, no search")
 

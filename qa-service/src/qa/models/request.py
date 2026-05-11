@@ -23,6 +23,7 @@ class QAResponse(BaseModel):
         model: Использованная модель
         sources: URL источников
         expanded_query: Расширенный запрос (опционально)
+        context_expanded_query: Расширенный запрос с учётом контекста (опционально)
         keywords: Ключевые слова (опционально)
         question_type: Тип вопроса (1=БЗ, 2=система, 3=общий)
     """
@@ -31,6 +32,7 @@ class QAResponse(BaseModel):
     model: str
     sources: list[str] = Field(default_factory=list)
     expanded_query: str | None = Field(default=None, max_length=1500)
+    context_expanded_query: str | None = Field(default=None, max_length=1500)
     keywords: dict | None = Field(default=None)
     question_type: int = Field(default=1)
 

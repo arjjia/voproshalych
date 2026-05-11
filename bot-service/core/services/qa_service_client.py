@@ -91,6 +91,7 @@ class QAServiceClient:
         return {
             "answer": payload.get("answer", ""),
             "expanded_query": payload.get("expanded_query"),
+            "context_expanded_query": payload.get("context_expanded_query"),
             "keywords": payload.get("keywords"),
             "model": payload.get("model", ""),
             "sources": payload.get("sources", []),

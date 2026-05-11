@@ -117,6 +117,8 @@ class DialogMessage(Base):
     model_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
     used_chunk_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     feedback: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    normalized_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    question_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),
@@ -134,6 +136,7 @@ class QuestionAnswerLink(Base):
     answer_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), nullable=False)
     expanded_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),

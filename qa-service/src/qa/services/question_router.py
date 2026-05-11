@@ -22,27 +22,30 @@ DEFAULT_TIMEOUT = 20.0
 class QuestionClassification:
     """Результат классификации вопроса."""
 
-    __slots__ = ("question_type", "expanded_query", "confidence")
+    __slots__ = ("question_type", "expanded_query", "confidence", "context_expanded_query")
 
     def __init__(
         self,
         question_type: int = QUESTION_TYPE_KB,
         expanded_query: str = "",
         confidence: float = 0.0,
+        context_expanded_query: str | None = None,
     ):
         self.question_type = question_type
         self.expanded_query = expanded_query
         self.confidence = confidence
+        self.context_expanded_query = context_expanded_query
 
 
 async def classify_and_expand(
     question: str,
     request_id: str = "",
+    dialog_context: str | None = None,
 ) -> QuestionClassification:
     """Классифицировать вопрос и расширить запрос для поиска.
 
-    Один вызов LLM определяет тип вопроса (1=БЗ, 2=система, 3=общий)
-    и расширяет запрос для лучшего поиска.
+    Один вызов LLM определяет тип вопроса (1=БЗ, 2=система, 3=общий),
+    нормализует запрос и (для типа 1) расширяет его с учётом контекста диалога.
 
     При ошибке/таймауте возвращает type=1 (fail-safe = база знаний)
     с оригинальным вопросом.
@@ -50,6 +53,7 @@ async def classify_and_expand(
     Args:
         question: Оригинальный вопрос пользователя.
         request_id: ID запроса для логирования.
+        dialog_context: История диалога (оригинальная).
 
     Returns:
         QuestionClassification с типом и расширенным запросом.
@@ -67,11 +71,17 @@ async def classify_and_expand(
         )
 
     try:
-        prompt = (
-            f"{QUERY_CLASSIFY_EXPAND_PROMPT}\n\n"
-            f"Вопрос: {question}\n\n"
-            f"Ответ (только JSON):"
-        )
+        prompt_parts = [QUERY_CLASSIFY_EXPAND_PROMPT]
+
+        if dialog_context and dialog_context.strip():
+            prompt_parts.append(
+                f"История диалога:\n{dialog_context}\n"
+            )
+
+        prompt_parts.append(f"Вопрос: {question}")
+        prompt_parts.append("Ответ (только JSON):")
+
+        prompt = "\n\n".join(prompt_parts)
 
         logger.info(
             f"[{request_id}] Phase 1 START: classify_and_expand, "
@@ -158,6 +168,13 @@ def _parse_classification_response(
         if len(expanded) > 1500:
             expanded = expanded[:1500]
 
+        context_expanded = parsed.get("context_expanded_query")
+        if context_expanded is not None:
+            if not isinstance(context_expanded, str) or not context_expanded.strip():
+                context_expanded = None
+            elif len(context_expanded) > 1500:
+                context_expanded = context_expanded[:1500]
+
         confidence = parsed.get("confidence", 0.5)
         if not isinstance(confidence, (int, float)):
             confidence = 0.5
@@ -166,6 +183,7 @@ def _parse_classification_response(
             question_type=q_type,
             expanded_query=expanded.strip(),
             confidence=float(confidence),
+            context_expanded_query=context_expanded.strip() if context_expanded else None,
         )
 
     except (json.JSONDecodeError, Exception) as e:

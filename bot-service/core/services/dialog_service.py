@@ -90,14 +90,16 @@ class DialogService:
         finally:
             session.close()
 
-    def build_context(self, session_id: int, max_chars: int = 1500) -> str:
+    def build_context(self, session_id: int, max_messages: int = 3, max_chars: int = 3000) -> str:
         """Собирает последние сообщения текущей сессии в текстовый контекст.
 
-        Берёт ВСЕ последние сообщения, пока суммарная длина не превышает max_chars.
+        Берёт до max_messages последних пар вопрос-ответ (сначала user, потом bot).
+        Если суммарная длина превышает max_chars — обрезает начало, оставляя конец.
 
         Args:
             session_id: Идентификатор сессии.
-            max_chars: Максимальное количество символов в контексте.
+            max_messages: Максимум пар вопрос-ответ (по умолчанию 3).
+            max_chars: Максимум символов в контексте (по умолчанию 3000).
 
         Returns:
             str: Текст контекста или пустая строка.
@@ -109,21 +111,23 @@ class DialogService:
                 session.query(DialogMessage)
                 .filter(DialogMessage.session_id == session_id)
                 .order_by(DialogMessage.id.desc())
+                .limit(max_messages * 2)
                 .all()
             )
             if not messages:
                 return ""
 
             lines = []
-            total_chars = 0
-            for msg in messages:
+            for msg in reversed(messages):
                 role = "Пользователь" if msg.role == USER_ROLE else "Бот"
-                line = f"{role}: {msg.content}"
-                if total_chars + len(line) + 1 > max_chars:
-                    break
-                lines.insert(0, line)
-                total_chars += len(line) + 1
-            return "\n".join(lines)
+                content = msg.content or ""
+                lines.append(f"{role}: {content}")
+
+            full_text = "\n".join(lines)
+            if len(full_text) <= max_chars:
+                return full_text
+
+            return full_text[len(full_text) - max_chars:]
         except Exception:
             session.rollback()
             return ""
@@ -138,6 +142,8 @@ class DialogService:
         model_used: str | None = None,
         expanded_query: str | None = None,
         keywords: dict | None = None,
+        question_type: int | None = None,
+        normalized_context: str | None = None,
     ) -> tuple[DialogMessage | None, DialogMessage | None]:
         """Сохраняет пару вопрос-ответ в историю и связывает их между собой.
 
@@ -148,6 +154,8 @@ class DialogService:
             model_used: Идентификатор модели, если он известен.
             expanded_query: Расширенный/исправленный запрос от LLM.
             keywords: Извлечённые ключевые слова (high_level, low_level).
+            question_type: Тип вопроса (1=БЗ, 2=система, 3=общий).
+            normalized_context: Нормализованный контекст для поиска.
 
         Returns:
             tuple[DialogMessage | None, DialogMessage | None]:
@@ -160,6 +168,8 @@ class DialogService:
                 session_id=session_id,
                 role=USER_ROLE,
                 content=question,
+                normalized_query=expanded_query,
+                question_type=question_type,
             )
             answer_message = DialogMessage(
                 session_id=session_id,
@@ -179,6 +189,7 @@ class DialogService:
                     answer_id=answer_message.id,
                     expanded_query=expanded_query,
                     keywords=keywords_json,
+                    normalized_context=normalized_context,
                 )
             )
             (
