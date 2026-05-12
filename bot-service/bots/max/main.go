@@ -71,6 +71,7 @@ type BotResponse struct {
 type InlineButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data"`
+	URL          string `json:"url,omitempty"`
 }
 
 // ReplyKeyboardButton описывает кнопку reply-клавиатуры.
@@ -667,11 +668,19 @@ func addKeyboardToMessage(message *maxbot.Message, rows [][]InlineButton) {
 
 		keyboardRow := keyboard.AddRow()
 		for _, button := range row {
-			keyboardRow.AddCallback(
-				button.Text,
-				detectButtonIntent(button.CallbackData),
-				button.CallbackData,
-			)
+			if button.URL != "" {
+				keyboardRow.AddLink(
+					button.Text,
+					schemes.DEFAULT,
+					button.URL,
+				)
+			} else {
+				keyboardRow.AddCallback(
+					button.Text,
+					detectButtonIntent(button.CallbackData),
+					button.CallbackData,
+				)
+			}
 		}
 	}
 
