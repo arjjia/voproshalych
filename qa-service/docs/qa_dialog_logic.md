@@ -6,152 +6,152 @@
 flowchart TD
     subgraph BOT_SERVICE["bot-service :8000"]
         direction TB
-        MSG_IN["Входящее сообщение<br/>Telegram / VK"]
+        MSG_IN["Входящее сообщение - Telegram / VK"]
         TYPE_CHECK{"Тип сообщения?"}
-        VOICE["«Я получил голосовое сообщение.<br/>Скоро здесь будет распознавание речи.»"]
-        UNSUPPORTED["«Этот формат сообщения<br/>пока не поддерживается.»"]
+        VOICE["voice: Я получил голосовое сообщение. Скоро здесь будет распознавание речи."]
+        UNSUPPORTED["other: Этот формат сообщения пока не поддерживается."]
         CMD_CHECK{"/команда?"}
-        CMD_START["/start → GREETING"]
-        CMD_HELP["/help → HELP_CONTACTS"]
-        CMD_NEW["🔄 новый диалог →<br/>«История сброшена! Задавайте новый вопрос 🔄»"]
-        CMD_SUB["🔔 рассылка →<br/>«Вы подписались...» / «Вы отписались...»"]
-        CMD_UNKNOWN["«Эта команда пока не поддерживается.»"]
-        PENDING["Отправить PENDING:<br/>«Сейчас я попробую ответить на этот вопрос,<br/>это может занять какое-то время...»<br/>auto-delete после ответа"]
-        SESSION["get_or_create_active_session(user_id)"]
+        CMD_START["/start - GREETING"]
+        CMD_HELP["/help - HELP_CONTACTS"]
+        CMD_NEW["Новый диалог - История сброшена!"]
+        CMD_SUB["Рассылка - подписка/отписка"]
+        CMD_UNKNOWN["Эта команда пока не поддерживается."]
+        PENDING["PENDING: Сейчас я попробую ответить... auto-delete"]
+        SESSION["get_or_create_active_session"]
         SESSION_ERR{"Сессия?"}
-        SESSION_FAIL["DB error → context = None"]
-        BUILD_CTX["build_context(session_id, max_chars=3000)<br/>SELECT messages ORDER BY id DESC<br/>Формат: «Пользователь: …» / «Бот: …»"]
+        SESSION_FAIL["DB error - context = None"]
+        BUILD_CTX["build_context - max_chars=3000"]
         CTX_RESULT{"history?"}
         CTX_NONE["context = None"]
         CTX_HAS["context = history"]
-        QA_CALL["POST http://qa:8004/qa<br/>{question, context?}<br/>X-Request-ID: uuid8"]
+        QA_CALL["POST http://qa:8004/qa"]
 
         MSG_IN --> TYPE_CHECK
         TYPE_CHECK -- "voice" --> VOICE
-        TYPE_CHECK -- "photo/sticker/..." --> UNSUPPORTED
+        TYPE_CHECK -- "photo/sticker" --> UNSUPPORTED
         TYPE_CHECK -- "text" --> CMD_CHECK
         CMD_CHECK -- "/start" --> CMD_START
-        CMD_CHECK -- "/help | 📋 помощь" --> CMD_HELP
-        CMD_CHECK -- "🔄 новый диалог" --> CMD_NEW
-        CMD_CHECK -- "🔔 рассылка" --> CMD_SUB
+        CMD_CHECK -- "/help" --> CMD_HELP
+        CMD_CHECK -- "new dialog" --> CMD_NEW
+        CMD_CHECK -- "subscribe" --> CMD_SUB
         CMD_CHECK -- "/command" --> CMD_UNKNOWN
-        CMD_CHECK -- "Обычный текст" --> PENDING --> SESSION --> SESSION_ERR
+        CMD_CHECK -- "text" --> PENDING --> SESSION --> SESSION_ERR
         SESSION_ERR -. "DB error" .-> SESSION_FAIL --> QA_CALL
         SESSION_ERR -- "OK" --> BUILD_CTX --> CTX_RESULT
-        CTX_RESULT -- "Пусто" --> CTX_NONE --> QA_CALL
-        CTX_RESULT -- "Непусто" --> CTX_HAS --> QA_CALL
+        CTX_RESULT -- "empty" --> CTX_NONE --> QA_CALL
+        CTX_RESULT -- "has" --> CTX_HAS --> QA_CALL
     end
 
     QA_CALL -- "HTTP" --> ENTRY
 
     subgraph QA_SERVICE["qa-service :8004"]
         direction TB
-        ENTRY["POST /qa<br/>QARequest {question ≤10000, context?}"]
-        VALIDATE{"Pydantic<br/>validation?"}
-        READY_CHECK{"LightRAG<br/>ready?"}
-        GLOBAL_TO["asyncio.timeout(total=60s)"]
+        ENTRY["POST /qa - question max 10000, context opt"]
+        VALIDATE{"Pydantic validation?"}
+        READY_CHECK{"LightRAG ready?"}
+        GLOBAL_TO["asyncio.timeout - total=60s"]
 
         ENTRY --> VALIDATE
-        VALIDATE -. "question пустой или >10000" .-> ERR_422
+        VALIDATE -. "invalid" .-> ERR_422
         VALIDATE -- "OK" --> READY_CHECK
         READY_CHECK -. "Нет" .-> ERR_503
         READY_CHECK -- "Да" --> GLOBAL_TO
 
         GLOBAL_TO --> P1_START
 
-        subgraph PHASE1["Phase 1: classify_and_expand()"]
+        subgraph PHASE1["Phase 1 - classify_and_expand"]
             direction TB
-            P1_START["classify_and_expand(<br/>question, dialog_context, request_id)"]
-            P1_POOL{"LLM provider<br/>доступен?"}
-            P1_PROMPT["Сборка prompt (части через \\n\\n):<br/>1. QUERY_CLASSIFY_EXPAND_PROMPT<br/>   (включает GLOSSARY_TYUMSU ~1800 симв.)<br/>2. «История диалога:\\n{dialog_context}»<br/>   (ТОЛЬКО если context не пустой)<br/>3. «Вопрос: {question}»<br/>4. «Ответ (только JSON):»"]
-            P1_LLM["llm_pool.call(<br/>prompt, temperature=0.1, max_tokens=256)<br/>timeout = query_expansion_timeout = 30s"]
-            P1_PARSE["_parse_classification_response()<br/>Regex поиск JSON {type, expanded_query,<br/>context_expanded_query, confidence}<br/>Валидация: type ∈ {1,2,3}"]
-            P1_RESULT["QuestionClassification {<br/>question_type, expanded_query,<br/>context_expanded_query, confidence}"]
-            P1_Q_LIMIT{"expanded_query ≤ 1500?"}
+            P1_START["classify_and_expand - question, dialog_context, request_id"]
+            P1_POOL{"LLM provider available?"}
+            P1_PROMPT["Prompt parts joined by newline:<br/>1. QUERY_CLASSIFY_EXPAND_PROMPT incl GLOSSARY ~1800 chars<br/>2. Dialog context if not empty<br/>3. Question text<br/>4. Output only JSON"]
+            P1_LLM["llm_pool.call - temp=0.1, max_tokens=256, timeout=30s"]
+            P1_PARSE["Parse JSON: type, expanded_query, context_expanded_query, confidence<br/>Validate type in 1,2,3"]
+            P1_RESULT["QuestionClassification"]
+            P1_Q_LIMIT{"expanded_query under 1500?"}
 
             P1_START --> P1_POOL
-            P1_POOL -. "Нет провайдера" .-> P1_FB
-            P1_POOL -- "Да" --> P1_PROMPT --> P1_LLM
-            P1_LLM -. "TimeoutError (30s)" .-> P1_FB
+            P1_POOL -. "no provider" .-> P1_FB
+            P1_POOL -- "yes" --> P1_PROMPT --> P1_LLM
+            P1_LLM -. "TimeoutError 30s" .-> P1_FB
             P1_LLM -. "Exception" .-> P1_FB
             P1_LLM -- "OK" --> P1_PARSE
             P1_PARSE -. "No JSON" .-> P1_FB
             P1_PARSE -- "OK" --> P1_RESULT --> P1_Q_LIMIT
-            P1_Q_LIMIT -- "Да" --> ROUTE
-            P1_Q_LIMIT -- "Нет" --> P1_CUT["[:1500]"] --> ROUTE
-            P1_FB["fallback: type=1,<br/>expanded=оригинал"] --> ROUTE
+            P1_Q_LIMIT -- "yes" --> ROUTE
+            P1_Q_LIMIT -- "no" --> P1_CUT["truncate to 1500"] --> ROUTE
+            P1_FB["fallback: type=1 expanded=original"] --> ROUTE
         end
 
         ROUTE{"question_type?"}
-        ROUTE -- "1 → База знаний" --> T1_SEARCH
-        ROUTE -- "2 → О боте" --> T2_BUILD
-        ROUTE -- "3 → Общий" --> T3_BUILD
+        ROUTE -- "1 KB" --> T1_SEARCH
+        ROUTE -- "2 bot" --> T2_BUILD
+        ROUTE -- "3 general" --> T3_BUILD
 
-        subgraph TYPE1["Тип 1: База знаний"]
+        subgraph TYPE1["Type 1: Knowledge Base"]
             direction TB
-            T1_SEARCH["Phase 2a: LightRAG search<br/>rag.aquery_data(search_query,<br/>mode=mix, top_k=5)<br/>timeout = total - 10 ≈50s"]
-            T1_FORMAT["_format_search_context(data)<br/>chunks → «--- Найденная информация ---»<br/>каждый chunk с [источник N] если URL<br/>entities[:15], desc[:100]<br/>relationships[:10], desc[:100]"]
-            T1_HAS_CTX{"search_context.strip()<br/>не пустой?"}
+            T1_SEARCH["Phase 2a: LightRAG search<br/>aquery_data - mode=mix, top_k=5<br/>timeout=50s"]
+            T1_FORMAT["_format_search_context<br/>chunks with source N tags<br/>entities 15, relationships 10"]
+            T1_HAS_CTX{"search_context not empty?"}
 
             T1_SEARCH --> T1_FORMAT --> T1_HAS_CTX
-            T1_SEARCH -. "Timeout/Exception →<br/>search_context = ''" .-> T1_HAS_CTX
+            T1_SEARCH -. "Timeout/Exception" .-> T1_HAS_CTX
 
-            T1_HAS_CTX -- "Да" --> WC_BUILD
-            T1_HAS_CTX -- "Нет" --> NC_BUILD
+            T1_HAS_CTX -- "yes" --> WC_BUILD
+            T1_HAS_CTX -- "no" --> NC_BUILD
 
-            subgraph T1_WITH_CTX["Тип 1 с контекстом БЗ: SYSTEM_PROMPT_WITH_CONTEXT → JSON"]
+            subgraph T1_WITH_CTX["Type 1 with context: SYSTEM_PROMPT_WITH_CONTEXT to JSON"]
                 direction TB
-                WC_BUILD["Payload (build_messages):<br/>─────────────────<br/>system: SYSTEM_PROMPT_WITH_CONTEXT<br/>user:<br/>  1. GOLDEN_CHUNKS ≤800<br/>  2. DIALOG_CONTEXT_PROMPT + dialog_context ≤1200<br/>     (если context не пустой)<br/>  3. search_context ≤1500<br/>  4. question ≤500"]
-                WC_LLM["llm_pool.call(messages)<br/>max_tokens=2048"]
-                WC_PARSE["parse_llm_json_response(raw)<br/>regex поиск JSON {relevance_type,<br/>relevant_sources, irrelevant_sources, answer}<br/>fallback: _parse_structured_text_fallback()<br/>если JSON не найден → relevance_type='b'"]
+                WC_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT_WITH_CONTEXT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ search_context max 1500<br/>+ question max 500"]
+                WC_LLM["llm_pool.call - max_tokens=2048"]
+                WC_PARSE["parse_llm_json_response<br/>JSON: relevance_type, relevant_sources,<br/>irrelevant_sources, answer<br/>Fallback: relevance_type=b"]
                 WC_REL{"relevance_type?"}
 
                 WC_BUILD --> WC_LLM --> WC_PARSE --> WC_REL
-                WC_REL -- "a: релевантный" --> WCA_RESULT
-                WC_REL -- "b: нерелевантный" --> WCB_RESULT
+                WC_REL -- "a: relevant" --> WCA_RESULT
+                WC_REL -- "b: irrelevant" --> WCB_RESULT
 
-                WCA_RESULT["relevance='a'<br/>answer = format_answer(parsed.answer)<br/>sources = build_source_links(<br/>  relevant_sources, source_index)<br/>→ [SourceLink{url, 'Подробнее N'}]"]
-                WCB_RESULT["relevance='b'<br/>answer = format_answer(parsed.answer)<br/>sources = []<br/>(2 предложения: не нашлось + рекомендация)"]
+                WCA_RESULT["relevance=a<br/>sources=build_source_links<br/>SourceLink url + label"]
+                WCB_RESULT["relevance=b<br/>sources=empty<br/>2 sentences: not found + recommendation"]
             end
 
-            subgraph T1_NO_CTX["Тип 1 без контекста БЗ: SYSTEM_PROMPT_NO_CONTEXT"]
+            subgraph T1_NO_CTX["Type 1 no context: SYSTEM_PROMPT_NO_CONTEXT"]
                 direction TB
-                NC_BUILD["Payload (build_no_context_messages):<br/>─────────────────<br/>system: SYSTEM_PROMPT_NO_CONTEXT<br/>user:<br/>  1. GOLDEN_CHUNKS ≤800<br/>  2. DIALOG_CONTEXT_PROMPT + dialog_context ≤1200<br/>     (если context не пустой)<br/>  3. question ≤500<br/>(search_context ОТСУТСТВУЕТ)"]
-                NC_LLM["llm_pool.call(messages)<br/>max_tokens=2048"]
-                NC_CLEAN["_safe_clean_answer():<br/>clean_markdown() + format_answer()"]
-                NC_ERR{"LLM вернул пустой?"}
-                NC_RESULT["relevance='b', sources=[],<br/>answer = чистый текст (2 предложения)"]
+                NC_BUILD["Payload build_no_context_messages:<br/>system: SYSTEM_PROMPT_NO_CONTEXT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO search_context"]
+                NC_LLM["llm_pool.call - max_tokens=2048"]
+                NC_CLEAN["_safe_clean_answer"]
+                NC_ERR{"LLM returned empty?"}
+                NC_RESULT["relevance=b, sources=empty, 2 sentences"]
 
                 NC_BUILD --> NC_LLM --> NC_CLEAN --> NC_ERR
-                NC_ERR -- "Нет" --> NC_RESULT
-                NC_ERR -- "Да → ValueError → HTTP 500" .-> ERR_500
+                NC_ERR -- "no" --> NC_RESULT
+                NC_ERR -- "yes" .-> ERR_500
             end
         end
 
-        subgraph TYPE2["Тип 2: Вопрос о боте"]
+        subgraph TYPE2["Type 2: About bot"]
             direction TB
-            T2_BUILD["Payload (build_messages):<br/>─────────────────<br/>system: SYSTEM_PROMPT_ABOUT_BOT<br/>user:<br/>  1. GOLDEN_CHUNKS ≤800<br/>  2. DIALOG_CONTEXT_PROMPT + dialog_context ≤1200<br/>     (если context не пустой)<br/>  3. question ≤500<br/>(search_context ОТСУТСТВУЕТ)"]
-            T2_LLM["llm_pool.call(messages)<br/>max_tokens=2048"]
-            T2_CLEAN["_safe_clean_answer()"]
-            T2_ERR{"LLM вернул пустой?"}
-            T2_RESULT["relevance_type=null, sources=[]"]
+            T2_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT_ABOUT_BOT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO search_context"]
+            T2_LLM["llm_pool.call - max_tokens=2048"]
+            T2_CLEAN["_safe_clean_answer"]
+            T2_ERR{"LLM returned empty?"}
+            T2_RESULT["relevance_type=null, sources=empty"]
 
             T2_BUILD --> T2_LLM --> T2_CLEAN --> T2_ERR
-            T2_ERR -- "Нет" --> T2_RESULT
-            T2_ERR -- "Да → ValueError → HTTP 500" .-> ERR_500
+            T2_ERR -- "no" --> T2_RESULT
+            T2_ERR -- "yes" .-> ERR_500
         end
 
-        subgraph TYPE3["Тип 3: Общий вопрос"]
+        subgraph TYPE3["Type 3: General question"]
             direction TB
-            T3_BUILD["Payload (build_messages):<br/>─────────────────<br/>system: SYSTEM_PROMPT<br/>user:<br/>  1. DIALOG_CONTEXT_PROMPT + dialog_context ≤1200<br/>     (если context не пустой)<br/>  2. question ≤500<br/>(GOLDEN_CHUNKS НЕТ)<br/>(search_context НЕТ)"]
-            T3_LLM["llm_pool.call(messages)<br/>max_tokens=2048"]
-            T3_CLEAN["_safe_clean_answer()"]
-            T3_ERR{"LLM вернул пустой?"}
-            T3_RESULT["relevance_type=null, sources=[]"]
+            T3_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT<br/>user: DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO GOLDEN_CHUNKS, NO search_context"]
+            T3_LLM["llm_pool.call - max_tokens=2048"]
+            T3_CLEAN["_safe_clean_answer"]
+            T3_ERR{"LLM returned empty?"}
+            T3_RESULT["relevance_type=null, sources=empty"]
 
             T3_BUILD --> T3_LLM --> T3_CLEAN --> T3_ERR
-            T3_ERR -- "Нет" --> T3_RESULT
-            T3_ERR -- "Да → ValueError → HTTP 500" .-> ERR_500
+            T3_ERR -- "no" --> T3_RESULT
+            T3_ERR -- "yes" .-> ERR_500
         end
 
         WCA_RESULT --> QAR
@@ -160,19 +160,19 @@ flowchart TD
         T2_RESULT --> QAR
         T3_RESULT --> QAR
 
-        subgraph RESULT["Результат"]
-            QAR["QAResponse {<br/>answer, model,<br/>sources: [SourceLink{url, label}],<br/>relevance_type: a | b | null,<br/>expanded_query, context_expanded_query,<br/>keywords, question_type: 1|2|3}"]
+        subgraph RESULT["Result"]
+            QAR["QAResponse: answer, model,<br/>sources SourceLink list,<br/>relevance_type a or b or null,<br/>expanded_query, context_expanded_query,<br/>keywords, question_type 1 or 2 or 3"]
         end
 
         GLOBAL_TO -. "TimeoutError" .-> ERR_504
     end
 
-    subgraph ERRORS["Обработка ошибок"]
+    subgraph ERRORS["Error handling"]
         direction TB
-        ERR_422["HTTP 422<br/>Pydantic Validation Error"]
-        ERR_503["HTTP 503<br/>«Service unavailable»<br/>LightRAG не инициализирован"]
-        ERR_504["HTTP 504<br/>«QA pipeline timeout»<br/>asyncio.TimeoutError (60s)"]
-        ERR_500["HTTP 500<br/>«QA pipeline error: {e}»"]
+        ERR_422["HTTP 422 - Pydantic Validation Error"]
+        ERR_503["HTTP 503 - Service unavailable - LightRAG not init"]
+        ERR_504["HTTP 504 - QA pipeline timeout - asyncio.TimeoutError 60s"]
+        ERR_500["HTTP 500 - QA pipeline error"]
     end
 
     ERR_422 --> BOT_FALLBACK_A
@@ -182,44 +182,44 @@ flowchart TD
 
     QAR -- "200 OK" --> BOT_PARSE
 
-    BOT_FALLBACK_A["«Сервис временно недоступен.<br/>Попробуйте позже.»"]
-    BOT_FALLBACK_B["«Не удалось получить ответ.<br/>Попробуйте повторить вопрос.»"]
+    BOT_FALLBACK_A["Сервис временно недоступен. Попробуйте позже."]
+    BOT_FALLBACK_B["Не удалось получить ответ. Попробуйте повторить вопрос."]
 
-    subgraph BOT_RESPONSE["bot-service: отправка ответа"]
+    subgraph BOT_RESPONSE["bot-service: send response"]
         direction TB
-        BOT_PARSE["_format_qa_answer(qa_result)"]
-        INLINE_CHECK{"relevance_type='a'<br/>и sources не пустой?"}
-        INLINE_YES["+ inline-кнопки «Подробнее N»<br/>+ ❤️ 👎 | 🔄 Новый диалог"]
-        INLINE_NO["+ ❤️ 👎 | 🔄 Новый диалог<br/>(без «Подробнее»)"]
-        BOT_TG["Telegram:<br/>InlineKeyboardButton(url=...)"]
-        BOT_VK["VK:<br/>OpenLink(link=..., label=...)"]
+        BOT_PARSE["_format_qa_answer"]
+        INLINE_CHECK{"relevance_type=a and sources not empty?"}
+        INLINE_YES["Inline buttons: Podrobnee N + Like Dislike + New Dialog"]
+        INLINE_NO["Buttons: Like Dislike + New Dialog only"]
+        BOT_TG["Telegram: InlineKeyboardButton"]
+        BOT_VK["VK: OpenLink"]
 
         BOT_PARSE --> INLINE_CHECK
-        INLINE_CHECK -- "Да" --> INLINE_YES --> BOT_TG
+        INLINE_CHECK -- "yes" --> INLINE_YES --> BOT_TG
         INLINE_YES --> BOT_VK
-        INLINE_CHECK -- "Нет" --> INLINE_NO --> BOT_TG
+        INLINE_CHECK -- "no" --> INLINE_NO --> BOT_TG
         INLINE_NO --> BOT_VK
     end
 
-    subgraph BOT_ERRORS["bot-service: ошибки при отправке"]
+    subgraph BOT_ERRORS["bot-service: send errors"]
         direction TB
-        TG_LONG["Telegram: сообщение слишком длинное<br/>→ truncate, если не получается →<br/>«Не удалось получить ответ...»"]
-        TG_BAD["TelegramBadRequest<br/>→ «Не удалось получить ответ...»"]
-        TG_ERR["Любая другая ошибка отправки<br/>→ «Не удалось получить ответ...»"]
+        TG_LONG["Telegram msg too long - truncate or answer failed"]
+        TG_BAD["TelegramBadRequest - answer failed"]
+        TG_ERR["Other send error - answer failed"]
     end
 
-    subgraph LIMITS["Карта лимитов"]
+    subgraph LIMITS["Limits"]
         direction LR
-        L_Q["question ≤ 10 000 символов<br/>422 при превышении"]
-        L_DC["dialog_context ≤ 3 000<br/>старые сообщения отбрасываются"]
-        L_EXP["expanded_query ≤ 1 500<br/>[:1500]"]
-        L_GC["golden_chunks ≤ 800<br/>обрезка по абзацу"]
-        L_DCP["dialog_context в payload ≤ 1 200<br/>жёсткая обрезка"]
-        L_SC["search_context ≤ 1 500<br/>обрезка по \\n---\\n"]
-        L_QU["question в payload ≤ 500<br/>жёсткая обрезка"]
-        L_TOK["ответ LLM ≤ 2 048 токенов"]
-        L_ANS["clean_answer ≤ 1 500<br/>обрезка по абзацу/строке"]
-        L_TOP["LightRAG top_k = 5"]
+        L_Q["question max 10000 - 422"]
+        L_DC["dialog_context max 3000 - old messages dropped"]
+        L_EXP["expanded_query max 1500"]
+        L_GC["golden_chunks max 800 - paragraph cut"]
+        L_DCP["dialog_context payload max 1200"]
+        L_SC["search_context max 1500 - chunk boundary"]
+        L_QU["question payload max 500"]
+        L_TOK["LLM response max 2048 tokens"]
+        L_ANS["clean_answer max 1500"]
+        L_TOP["LightRAG top_k=5"]
 
         L_Q --> L_DC --> L_EXP --> L_GC --> L_DCP --> L_SC --> L_QU --> L_TOK --> L_ANS --> L_TOP
     end
