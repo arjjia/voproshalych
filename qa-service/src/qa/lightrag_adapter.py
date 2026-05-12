@@ -225,7 +225,7 @@ def sentence_aware_chunking(
 
 _llm_call_count = 0
 _llm_last_call_time = 0.0
-LLM_CALL_DELAY = 5.0
+LLM_CALL_DELAY = 0.5
 
 
 def _get_lightrag_llm_model() -> str:
@@ -615,7 +615,7 @@ def _patch_merge_chunks():
                 query_embedding=query_embedding,
             )
 
-        merge_preset = os.getenv("MERGE_PRESET", "score_tuned").lower().strip()
+        merge_preset = os.getenv("MERGE_PRESET", "score_cfg_a").lower().strip()
 
         if merge_preset == "rrf":
             rrf_k = int(os.getenv("RRF_K", "60"))

@@ -1,16 +1,35 @@
-"""Формирование и адаптивное сокращение payload для LLM."""
+"""Формирование payload для LLM с фиксированными лимитами на каждую секцию."""
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-MAX_PROMPT_TOKENS = 2000
-CHARS_PER_TOKEN = 4
+GOLDEN_CHUNKS_MAX_CHARS = 800
+DIALOG_CONTEXT_MAX_CHARS = 1200
+SEARCH_CONTEXT_MAX_CHARS = 1500
+QUESTION_MAX_CHARS = 500
 
 
-def _estimate_tokens(text: str) -> int:
-    """Оценить количество токенов в тексте (грубая оценка: 1 токен ≈ 4 символа)."""
-    return len(text) // CHARS_PER_TOKEN
+def _truncate_to_limit(text: str, max_chars: int, boundary: str = "\n---\n") -> str:
+    """Обрезать текст до лимита символов с сохранением целостности чанков.
+
+    Args:
+        text: Текст для обрезки.
+        max_chars: Максимальное количество символов.
+        boundary: Граница чанка для поиска точки обрезки.
+
+    Returns:
+        Обрезанный текст.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[:max_chars]
+    last_boundary = truncated.rfind(boundary)
+    if last_boundary > max_chars * 0.5:
+        truncated = truncated[:last_boundary]
+
+    return truncated.strip() + "\n\n[...часть контекста опущена...]"
 
 
 def build_messages(
@@ -19,14 +38,22 @@ def build_messages(
     search_context: str | None = None,
     dialog_context: str | None = None,
     dialog_context_prompt: str | None = None,
+    golden_chunks: str | None = None,
 ) -> list[dict]:
-    """Сформировать messages[] для ChatCompletion API с адаптивным сокращением.
+    """Сформировать messages[] для ChatCompletion API.
+
+    Каждая секция имеет фиксированный лимит символов:
+    - golden_chunks: до 800 символов (обрезка по границе абзаца)
+    - dialog_context: до 1200 символов (обрезка по границе строки)
+    - search_context: до 1500 символов (обрезка по границе \\n---\\n)
+    - question: до 500 символов (жёсткая обрезка)
 
     Приоритет сохранения (что отбрасываем последним):
     1. system_prompt — обязателен
     2. question — обязателен
     3. search_context — важен для ответа
-    4. dialog_context — наименее важен, отбрасываем первым
+    4. golden_chunks — базовая информация
+    5. dialog_context — наименее важен, отбрасываем первым
 
     Args:
         system_prompt: Системный промт.
@@ -34,67 +61,45 @@ def build_messages(
         search_context: Контекст из поиска (чанки, entities).
         dialog_context: История диалога.
         dialog_context_prompt: Инструкция для контекста диалога.
+        golden_chunks: Базовая информация об университете.
 
     Returns:
         Список сообщений [{"role": "system"/"user", "content": "..."}].
     """
     user_parts: list[str] = []
 
+    if golden_chunks and golden_chunks.strip():
+        gc = _truncate_to_limit(golden_chunks, GOLDEN_CHUNKS_MAX_CHARS, "\n\n")
+        user_parts.append(f"Базовая информация о ТюмГУ:\n{gc}")
+
     if dialog_context and dialog_context.strip():
+        dc = dialog_context
+        if len(dc) > DIALOG_CONTEXT_MAX_CHARS:
+            dc = dc[:DIALOG_CONTEXT_MAX_CHARS]
         ctx_header = dialog_context_prompt or "История диалога:"
-        user_parts.append(f"{ctx_header}\n{dialog_context}")
+        user_parts.append(f"{ctx_header}\n{dc}")
 
     if search_context and search_context.strip():
-        user_parts.append(f"Контекст из базы знаний:\n{search_context}")
+        sc = _truncate_to_limit(search_context, SEARCH_CONTEXT_MAX_CHARS)
+        user_parts.append(f"Контекст из базы знаний:\n{sc}")
 
-    user_parts.append(f"Вопрос студента: {question}")
+    q = question
+    if len(q) > QUESTION_MAX_CHARS:
+        q = q[:QUESTION_MAX_CHARS]
+    user_parts.append(f"Вопрос студента: {q}")
 
     user_content = "\n\n".join(user_parts)
-    total_tokens = _estimate_tokens(system_prompt) + _estimate_tokens(user_content)
 
-    strategy = "full"
-    if total_tokens > MAX_PROMPT_TOKENS:
-        logger.warning(
-            f"[PAYLOAD] Total ~{total_tokens} tokens > {MAX_PROMPT_TOKENS} limit, "
-            f"truncating..."
-        )
+    total_chars = len(system_prompt) + len(user_content)
+    total_tokens_est = total_chars // 4
 
-        if dialog_context and dialog_context.strip():
-            user_parts_no_ctx = [
-                f"Контекст из базы знаний:\n{search_context}"
-                if search_context
-                else None,
-                f"Вопрос студента: {question}",
-            ]
-            user_parts_no_ctx = [p for p in user_parts_no_ctx if p]
-            user_content_no_ctx = "\n\n".join(user_parts_no_ctx)
-            tokens_no_ctx = _estimate_tokens(system_prompt) + _estimate_tokens(
-                user_content_no_ctx
-            )
-
-            if tokens_no_ctx <= MAX_PROMPT_TOKENS:
-                user_content = user_content_no_ctx
-                strategy = "no_dialog_context"
-                logger.info("[PAYLOAD] Removed dialog context, fits in limit")
-            else:
-                truncated_search = _truncate_search_context(
-                    search_context or "", MAX_PROMPT_TOKENS - _estimate_tokens(system_prompt) - _estimate_tokens(question) - 50
-                )
-                user_content = f"Контекст из базы знаний:\n{truncated_search}\n\nВопрос студента: {question}"
-                strategy = "truncated_search"
-                logger.info("[PAYLOAD] Removed dialog context + truncated search")
-        else:
-            truncated_search = _truncate_search_context(
-                search_context or "", MAX_PROMPT_TOKENS - _estimate_tokens(system_prompt) - _estimate_tokens(question) - 50
-            )
-            user_content = f"Контекст из базы знаний:\n{truncated_search}\n\nВопрос студента: {question}"
-            strategy = "truncated_search"
-
-    final_tokens = _estimate_tokens(system_prompt) + _estimate_tokens(user_content)
     logger.info(
-        f"[PAYLOAD] Strategy: {strategy}, "
-        f"estimated tokens: system={_estimate_tokens(system_prompt)}, "
-        f"user={_estimate_tokens(user_content)}, total={final_tokens}"
+        f"[PAYLOAD] Sections: golden_chunks={bool(golden_chunks)}, "
+        f"dialog_context={bool(dialog_context)}, "
+        f"search_context={bool(search_context)}, "
+        f"user_content_len={len(user_content)}, "
+        f"total_chars={total_chars}, "
+        f"estimated_tokens={total_tokens_est}"
     )
 
     return [
@@ -103,23 +108,54 @@ def build_messages(
     ]
 
 
-def _truncate_search_context(search_context: str, max_tokens: int) -> str:
-    """Обрезать контекст поиска до лимита токенов.
+def build_no_context_messages(
+    system_prompt: str,
+    question: str,
+    dialog_context: str | None = None,
+    dialog_context_prompt: str | None = None,
+    golden_chunks: str | None = None,
+) -> list[dict]:
+    """Сформировать messages для случая без контекста поиска.
+
+    Используется для SYSTEM_PROMPT_NO_CONTEXT (ветка B).
+    Отличие: нет search_context, LLM отвечает свободным текстом.
 
     Args:
-        search_context: Полный контекст поиска.
-        max_tokens: Максимум токенов.
+        system_prompt: Системный промт (SYSTEM_PROMPT_NO_CONTEXT).
+        question: Вопрос пользователя.
+        dialog_context: История диалога.
+        dialog_context_prompt: Инструкция для контекста диалога.
+        golden_chunks: Базовая информация об университете.
 
     Returns:
-        Обрезанный контекст.
+        Список сообщений [{"role": "system"/"user", "content": "..."}].
     """
-    max_chars = max_tokens * CHARS_PER_TOKEN
-    if len(search_context) <= max_chars:
-        return search_context
+    user_parts: list[str] = []
 
-    truncated = search_context[:max_chars]
-    last_boundary = truncated.rfind("\n---\n")
-    if last_boundary > max_chars * 0.5:
-        truncated = truncated[:last_boundary]
+    if golden_chunks and golden_chunks.strip():
+        gc = _truncate_to_limit(golden_chunks, GOLDEN_CHUNKS_MAX_CHARS, "\n\n")
+        user_parts.append(f"Базовая информация о ТюмГУ:\n{gc}")
 
-    return truncated.strip() + "\n\n[... часть контекста опущена ...]"
+    if dialog_context and dialog_context.strip():
+        dc = dialog_context
+        if len(dc) > DIALOG_CONTEXT_MAX_CHARS:
+            dc = dc[:DIALOG_CONTEXT_MAX_CHARS]
+        ctx_header = dialog_context_prompt or "История диалога:"
+        user_parts.append(f"{ctx_header}\n{dc}")
+
+    q = question
+    if len(q) > QUESTION_MAX_CHARS:
+        q = q[:QUESTION_MAX_CHARS]
+    user_parts.append(f"Вопрос студента: {q}")
+
+    user_content = "\n\n".join(user_parts)
+
+    logger.info(
+        f"[PAYLOAD] no_context: dialog_context={bool(dialog_context)}, "
+        f"user_content_len={len(user_content)}"
+    )
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]

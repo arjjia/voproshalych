@@ -73,7 +73,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 240s
 
   bot-core:
     build:
@@ -228,4 +228,4 @@ volumes:
 
 secrets:
   hf_token:
-    environment: HF_TOKEN
+    environment: ${HF_TOKEN_ENV_NAME:-HF_TOKEN}

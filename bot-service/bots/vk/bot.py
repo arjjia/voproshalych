@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 import re
-from vkbottle import Callback, GroupEventType, GroupTypes, Keyboard, Text
+from vkbottle import Callback, GroupEventType, GroupTypes, Keyboard, Text, OpenLink
 from vkbottle.bot import Bot, Message
 
 
@@ -278,6 +278,8 @@ VK_INLINE_EXCLUDED = {"dialog:start_new"}
 def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:
     """Преобразует кнопки из ответа core в VK inline keyboard.
 
+    Поддерживает callback-кнопки и URL-кнопки (OpenLink).
+
     Args:
         button_rows: Строки кнопок из ответа core.
 
@@ -303,9 +305,14 @@ def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None
             keyboard.row()
 
         for button in row:
-            keyboard.add(
-                Callback(button["text"], payload={"command": button["callback_data"]})
-            )
+            if button.get("url"):
+                keyboard.add(
+                    OpenLink(link=button["url"], label=button["text"])
+                )
+            else:
+                keyboard.add(
+                    Callback(button["text"], payload={"command": button.get("callback_data", "")})
+                )
 
     return keyboard.get_json()
 

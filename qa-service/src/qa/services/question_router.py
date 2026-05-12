@@ -90,7 +90,11 @@ async def classify_and_expand(
         t_start = time.time()
 
         response = await asyncio.wait_for(
-            llm_pool.call(prompt=prompt),
+            llm_pool.call(
+                prompt=prompt,
+                temperature=0.1,
+                max_tokens=256,
+            ),
             timeout=timeout,
         )
 

@@ -19,7 +19,16 @@ RUN uv pip install --system langchain-core langchain-text-splitters pydantic-set
 RUN uv sync
 
 COPY save_models.py ./
-RUN test -f /run/secrets/hf_token && HF_TOKEN=$(cat /run/secrets/hf_token) uv run python save_models.py || uv run python save_models.py
+RUN --mount=type=secret,id=hf_token \
+    --mount=type=cache,target=/hf-cache \
+    sh -c 'export HF_TOKEN="$(cat /run/secrets/hf_token)" && \
+           export HF_HOME=/hf-cache && \
+           export TRANSFORMERS_CACHE=/hf-cache && \
+           export PYTHONUNBUFFERED=1 && \
+           uv run python -u save_models.py && \
+           mkdir -p /root/.cache && \
+           rm -rf /root/.cache/huggingface && \
+           cp -a /hf-cache /root/.cache/huggingface'
 
 COPY src/ ./src/
 COPY scripts/ ./scripts/

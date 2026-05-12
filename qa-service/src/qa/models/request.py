@@ -3,6 +3,18 @@
 from pydantic import BaseModel, Field
 
 
+class SourceLink(BaseModel):
+    """Источник для отображения inline-кнопкой.
+
+    Attributes:
+        url: URL источника.
+        label: Текст кнопки (например, «Подробнее 1»).
+    """
+
+    url: str
+    label: str = "Подробнее"
+
+
 class QARequest(BaseModel):
     """Запрос к QA сервису.
 
@@ -21,20 +33,22 @@ class QAResponse(BaseModel):
     Attributes:
         answer: Ответ от LLM (чистый текст без markdown)
         model: Использованная модель
-        sources: URL источников
+        sources: Источники с URL и label для inline-кнопок
         expanded_query: Расширенный запрос (опционально)
         context_expanded_query: Расширенный запрос с учётом контекста (опционально)
         keywords: Ключевые слова (опционально)
         question_type: Тип вопроса (1=БЗ, 2=система, 3=общий)
+        relevance_type: Тип релевантности контекста (a=релевантный, b=нерелевантный, None=без поиска)
     """
 
     answer: str
     model: str
-    sources: list[str] = Field(default_factory=list)
+    sources: list[SourceLink] = Field(default_factory=list)
     expanded_query: str | None = Field(default=None, max_length=1500)
     context_expanded_query: str | None = Field(default=None, max_length=1500)
     keywords: dict | None = Field(default=None)
     question_type: int = Field(default=1)
+    relevance_type: str | None = Field(default=None, max_length=1)
 
 
 class HolidayGreetingRequest(BaseModel):

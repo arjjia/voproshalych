@@ -17,10 +17,12 @@ class InlineButton(BaseModel):
     Attributes:
         text: Текст на кнопке.
         callback_data: Данные callback-события.
+        url: URL для кнопки-ссылки (если указан, кнопка открывает URL).
     """
 
     text: str = Field(..., description="Текст кнопки")
-    callback_data: str = Field(..., description="Данные callback-события")
+    callback_data: str = Field(default="", description="Данные callback-события")
+    url: str | None = Field(default=None, description="URL для кнопки-ссылки")
 
 
 class KeyboardButton(BaseModel):

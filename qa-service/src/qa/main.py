@@ -14,10 +14,11 @@ from .api import qa_router, health_router, holiday_router, kb_router
 from .kb.embedding import get_embedding_model
 from .llm import get_llm_pool
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ async def lifespan(app: FastAPI):
     llm_pool = get_llm_pool()
     available = llm_pool.get_available_providers()
     logger.info(f"Available LLM providers: {available}")
+
+    await llm_pool.warmup()
 
     # LightRAG всегда включен (гибридный поиск: вектора + граф)
     await init_lightrag()

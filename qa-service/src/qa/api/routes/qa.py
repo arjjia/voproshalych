@@ -1,8 +1,7 @@
-"""API роут для QA с разделённым поиском и генерацией."""
+"""API роут для QA с JSON-ответом LLM и классификацией релевантности."""
 
 import asyncio
 import logging
-import os
 import time
 import uuid
 
@@ -11,12 +10,13 @@ from fastapi import APIRouter, Header, HTTPException
 
 from ...config.prompts import (
     DIALOG_CONTEXT_PROMPT,
+    GOLDEN_CHUNKS,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_NO_CONTEXT,
     SYSTEM_PROMPT_ABOUT_BOT,
     SYSTEM_PROMPT_WITH_CONTEXT,
 )
-from ...models.request import QARequest, QAResponse
+from ...models.request import QARequest, QAResponse, SourceLink
 from ...llm import get_llm_pool
 from ...llm.config import get_llm_config
 from ...services.question_router import (
@@ -25,14 +25,21 @@ from ...services.question_router import (
     QUESTION_TYPE_SYSTEM,
     classify_and_expand,
 )
-from ...services.payload_builder import build_messages
-from ...services.response_processor import process_llm_response
+from ...services.payload_builder import build_messages, build_no_context_messages
+from ...services.response_processor import (
+    build_source_links,
+    clean_markdown,
+    format_answer,
+    parse_llm_json_response,
+)
 
 nest_asyncio.apply()
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa", tags=["qa"])
+
+SEARCH_TOP_K = 5
 
 
 def _get_timeouts() -> dict:
@@ -43,23 +50,6 @@ def _get_timeouts() -> dict:
         "lightrag": total_timeout - 10,
         "generation": total_timeout,
     }
-
-
-def _safe_process_response(raw_content: str) -> tuple[str, list[str]]:
-    """Обработать ответ LLM с проверкой на пустой результат.
-
-    Args:
-        raw_content: Сырой ответ от LLM.
-
-    Returns:
-        Кортеж (clean_answer, links).
-
-    Raises:
-        ValueError: Если ответ пустой.
-    """
-    if not raw_content or not raw_content.strip():
-        raise ValueError("LLM returned empty response")
-    return process_llm_response(raw_content)
 
 
 def _format_search_context(data: dict) -> tuple[str, dict[str, str]]:
@@ -103,91 +93,29 @@ def _format_search_context(data: dict) -> tuple[str, dict[str, str]]:
     entities = result_data.get("entities", [])
     if entities:
         entity_lines = []
-        for entity in entities[:30]:
+        for entity in entities[:15]:
             name = entity.get("entity_name", "")
             desc = entity.get("description", "")
             if name:
-                entity_lines.append(f"{name}: {desc}" if desc else name)
+                desc_short = desc[:100] if desc else ""
+                entity_lines.append(f"{name}: {desc_short}" if desc_short else name)
         if entity_lines:
             parts.append("--- Сущности ---\n" + "\n".join(entity_lines))
 
     relationships = result_data.get("relationships", [])
     if relationships:
         rel_lines = []
-        for rel in relationships[:20]:
+        for rel in relationships[:10]:
             src = rel.get("src_id", "")
             tgt = rel.get("tgt_id", "")
             desc = rel.get("description", "")
             if src and tgt:
-                rel_lines.append(f"{src} → {tgt}: {desc}")
+                desc_short = desc[:100] if desc else ""
+                rel_lines.append(f"{src} → {tgt}: {desc_short}")
         if rel_lines:
             parts.append("--- Связи ---\n" + "\n".join(rel_lines))
 
     return "\n\n".join(parts), source_index
-
-
-def _extract_sources_from_data(data: dict) -> list[str]:
-    """Извлечь уникальные URL источников из результата поиска.
-
-    Args:
-        data: Результат LightRAG aquery_data.
-
-    Returns:
-        Список URL источников.
-    """
-    from qa.lightrag_adapter import extract_urls_from_search_data
-
-    return extract_urls_from_search_data(data, top_k=100)
-
-
-def _filter_used_sources(
-    raw_answer: str,
-    all_sources: list[str],
-    source_index: dict[str, str],
-) -> list[str]:
-    """Отфильтровать источники по тем, которые LLM реально использовал.
-
-    LLM указывает использованные источники строкой вида:
-    Использованные источники: 1
-
-    Args:
-        raw_answer: Сырой ответ LLM.
-        all_sources: Все найденные URL.
-        source_index: Маппинг {номер: URL}.
-
-    Returns:
-        Список URL только использованных источников (не более 1).
-    """
-    import re
-
-    if not source_index:
-        return all_sources[:1] if all_sources else []
-
-    match = re.search(
-        r"[Ии]спользованн?ые?\s+источники:\s*([\d,\s]+)",
-        raw_answer,
-    )
-    if not match:
-        match = re.search(r"Источники:\s*([\d,\s]+)", raw_answer)
-
-    if match:
-        used_indices = set()
-        for part in match.group(1).split(","):
-            part = part.strip()
-            if part.isdigit():
-                used_indices.add(part)
-
-        used_urls = []
-        for idx in sorted(used_indices, key=int):
-            url = source_index.get(idx)
-            if url and url not in used_urls:
-                used_urls.append(url)
-
-        if used_urls:
-            return used_urls[:1]
-
-    return all_sources[:1] if all_sources else []
-
 
 def _extract_keywords_from_data(data: dict) -> dict:
     """Извлечь ключевые слова из метаданных результата поиска."""
@@ -199,15 +127,31 @@ def _extract_keywords_from_data(data: dict) -> dict:
     }
 
 
+def _safe_clean_answer(raw_content: str) -> str:
+    """Очистить и форматировать текстовый ответ LLM.
+
+    Args:
+        raw_content: Сырой ответ от LLM.
+
+    Returns:
+        Очищенный текст ответа.
+
+    Raises:
+        ValueError: Если ответ пустой.
+    """
+    if not raw_content or not raw_content.strip():
+        raise ValueError("LLM returned empty response")
+    cleaned = clean_markdown(raw_content)
+    return format_answer(cleaned)
+
+
 @router.post("", response_model=QAResponse)
 async def ask_question(
     request: QARequest,
     x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ) -> QAResponse:
-    """Задать вопрос QA системе с маршрутизацией и разделённым поиском/генерацией."""
-    from lightrag import QueryParam
-    from ...main import get_lightrag, is_lightrag_ready
-    from ...lightrag_adapter import get_last_extracted_keywords
+    """Задать вопрос QA системе."""
+    from ...main import is_lightrag_ready
 
     req_id = x_request_id or uuid.uuid4().hex[:8]
     timeouts = _get_timeouts()
@@ -288,6 +232,7 @@ async def ask_question(
                 f"[{req_id}] {'=' * 60}\n"
                 f"[{req_id}] COMPLETE — {total_elapsed:.1f}s, "
                 f"type={question_type}, "
+                f"relevance={result.relevance_type}, "
                 f"answer_len={len(result.answer)}, "
                 f"sources={len(result.sources)}\n"
                 f"[{req_id}] {'=' * 60}"
@@ -316,49 +261,39 @@ async def _handle_kb_question(
     timeouts: dict,
     start_time: float,
 ) -> QAResponse:
-    """Обработка вопроса к базе знаний: поиск + генерация."""
+    """Обработка вопроса к базе знаний: поиск + генерация с JSON-ответом."""
     from lightrag import QueryParam
     from ...main import get_lightrag
 
-    # ── Phase 2a: LightRAG search (no generation) ──
     t2_start = time.time()
     rag = get_lightrag()
 
     search_context = ""
-    sources: list[str] = []
+    source_index: dict[str, str] = {}
     keywords: dict = {"high_level": [], "low_level": []}
 
     try:
         logger.info(
-            f"[{req_id}] Phase 2a START: aquery_data(mode=mix)\n"
+            f"[{req_id}] Phase 2a START: aquery_data(mode=mix, top_k={SEARCH_TOP_K})\n"
             f"[{req_id}]   search_query: '{search_query[:120]}'"
         )
 
         search_data = await asyncio.wait_for(
             rag.aquery_data(
                 search_query,
-                param=QueryParam(mode="mix", top_k=8),
+                param=QueryParam(mode="mix", top_k=SEARCH_TOP_K),
             ),
             timeout=timeouts["lightrag"],
         )
         t2_elapsed = time.time() - t2_start
 
-        if os.getenv("RERANKER_ENABLED", "false").lower() == "true":
-            from ...kb.reranker import rerank_chunks
-
-            chunks = search_data.get("data", {}).get("chunks", [])
-            if chunks:
-                reranked = rerank_chunks(search_query, chunks, top_k=8)
-                search_data["data"]["chunks"] = reranked
-
         search_context, source_index = _format_search_context(search_data)
-        sources = _extract_sources_from_data(search_data)
         keywords = _extract_keywords_from_data(search_data)
 
         logger.info(
             f"[{req_id}] Phase 2a DONE: search — {t2_elapsed:.1f}s\n"
             f"[{req_id}]   context_len={len(search_context)}, "
-            f"sources={len(sources)}, "
+            f"sources_indexed={len(source_index)}, "
             f"keywords_HL={keywords.get('high_level', [])[:5]}"
         )
     except (asyncio.TimeoutError, Exception) as search_err:
@@ -370,38 +305,19 @@ async def _handle_kb_question(
 
     if not search_context.strip():
         logger.info(
-            f"[{req_id}] No search context found, "
-            f"generating answer without KB context"
+            f"[{req_id}] No search context, generating answer without KB"
         )
-        messages = build_messages(
-            system_prompt=SYSTEM_PROMPT_NO_CONTEXT,
-            question=original_question,
-            search_context=None,
-            dialog_context=dialog_context,
-            dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
-        )
-
-        response = await asyncio.wait_for(
-            llm_pool.call(prompt="", messages=messages),
-            timeout=timeouts["generation"],
-        )
-        t3_elapsed = time.time() - t2_start
-
-        clean_answer, _ = _safe_process_response(response.content)
-
-        logger.info(
-            f"[{req_id}] Phase 2 DONE (no KB context): "
-            f"{t3_elapsed:.1f}s, model={response.model}"
+        return await _generate_no_kb_answer(
+            req_id,
+            original_question,
+            dialog_context,
+            llm_pool,
+            timeouts,
+            start_time,
+            keywords,
         )
 
-        return QAResponse(
-            answer=clean_answer,
-            model=response.model,
-            sources=[],
-            keywords=keywords,
-        )
-
-    # ── Phase 2b: Build payload + generate answer ──
+    # ── Есть контекст: SYSTEM_PROMPT_WITH_CONTEXT + JSON ответ ──
     t3_start = time.time()
     messages = build_messages(
         system_prompt=SYSTEM_PROMPT_WITH_CONTEXT,
@@ -409,19 +325,17 @@ async def _handle_kb_question(
         search_context=search_context,
         dialog_context=dialog_context,
         dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
+        golden_chunks=GOLDEN_CHUNKS,
     )
 
     logger.info(
-        f"[{req_id}] Phase 2b START: generate answer\n"
+        f"[{req_id}] Phase 2b START: generate with context (JSON mode)\n"
         f"[{req_id}]   system_prompt_len={len(messages[0]['content'])}\n"
         f"[{req_id}]   user_prompt_len={len(messages[1]['content'])}"
     )
 
     response = await asyncio.wait_for(
-        llm_pool.call(
-            prompt="",
-            messages=messages,
-        ),
+        llm_pool.call(prompt="", messages=messages),
         timeout=timeouts["generation"],
     )
     t3_elapsed = time.time() - t3_start
@@ -430,38 +344,84 @@ async def _handle_kb_question(
     logger.info(
         f"[{req_id}] Phase 2b DONE: generation — {t3_elapsed:.1f}s\n"
         f"[{req_id}]   model={response.model}, "
-        f"raw_answer_len={len(raw_answer)}, "
-        f"tokens={response.usage}"
+        f"raw_answer_len={len(raw_answer)}"
     )
 
-    # ── Phase 3: Post-processing ──
-    clean_answer, answer_links = _safe_process_response(raw_answer)
+    # ── Парсинг JSON ответа ──
+    parsed = parse_llm_json_response(raw_answer)
 
-    used_sources = _filter_used_sources(raw_answer, sources, source_index)
+    relevance_type = parsed.relevance_type
+    answer = format_answer(parsed.answer)
 
-    # Выбираем ТОЛЬКО ОДНУ наиболее релевантную ссылку
-    if used_sources:
-        final_sources = [used_sources[0]]
-    elif answer_links:
-        final_sources = [answer_links[0]]
-    else:
-        final_sources = []
+    # ── Формирование источников (inline-кнопки) ──
+    source_links: list[SourceLink] = []
+
+    if relevance_type == "a" and parsed.relevant_sources:
+        source_links = build_source_links(parsed.relevant_sources, source_index)
 
     logger.info(
-        f"[{req_id}] Sources: {len(sources)} found → " f"1 selected for response"
+        f"[{req_id}] Parsed: relevance={relevance_type}, "
+        f"relevant={parsed.relevant_sources}, "
+        f"irrelevant={parsed.irrelevant_sources}, "
+        f"source_links={len(source_links)}"
     )
 
     total_elapsed = time.time() - start_time
     logger.info(
-        f"[{req_id}] Pipeline DONE: {total_elapsed:.1f}s "
-        f"(search={t2_elapsed:.1f}s, gen={t3_elapsed:.1f}s)"
+        f"[{req_id}] Pipeline DONE: {total_elapsed:.1f}s, "
+        f"relevance={relevance_type}"
+    )
+
+    return QAResponse(
+        answer=answer,
+        model=response.model,
+        sources=source_links,
+        keywords=keywords,
+        relevance_type=relevance_type,
+    )
+
+
+async def _generate_no_kb_answer(
+    req_id: str,
+    original_question: str,
+    dialog_context: str | None,
+    llm_pool,
+    timeouts: dict,
+    start_time: float,
+    keywords: dict,
+) -> QAResponse:
+    """Генерация ответа без контекста из БЗ (SYSTEM_PROMPT_NO_CONTEXT).
+
+    Логика ответа идентична типу B (нерелевантный контекст).
+    """
+    logger.info(f"[{req_id}] Generating answer with SYSTEM_PROMPT_NO_CONTEXT")
+
+    messages = build_no_context_messages(
+        system_prompt=SYSTEM_PROMPT_NO_CONTEXT,
+        question=original_question,
+        dialog_context=dialog_context,
+        dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
+        golden_chunks=GOLDEN_CHUNKS,
+    )
+
+    response = await asyncio.wait_for(
+        llm_pool.call(prompt="", messages=messages),
+        timeout=timeouts["generation"],
+    )
+
+    clean_answer = _safe_clean_answer(response.content)
+
+    logger.info(
+        f"[{req_id}] No-KB answer done: model={response.model}, "
+        f"answer_len={len(clean_answer)}"
     )
 
     return QAResponse(
         answer=clean_answer,
         model=response.model,
-        sources=final_sources,
+        sources=[],
         keywords=keywords,
+        relevance_type="b",
     )
 
 
@@ -480,9 +440,9 @@ async def _handle_system_question(
     messages = build_messages(
         system_prompt=SYSTEM_PROMPT_ABOUT_BOT,
         question=question,
-        search_context=None,
         dialog_context=dialog_context,
         dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
+        golden_chunks=GOLDEN_CHUNKS,
     )
 
     logger.info(f"[{req_id}] Phase 2 START: system question, no search")
@@ -493,7 +453,7 @@ async def _handle_system_question(
     )
     t2_elapsed = time.time() - t2_start
 
-    clean_answer, _ = process_llm_response(response.content)
+    clean_answer = _safe_clean_answer(response.content)
 
     logger.info(
         f"[{req_id}] Phase 2 DONE: system — {t2_elapsed:.1f}s, "
@@ -522,7 +482,6 @@ async def _handle_general_question(
     messages = build_messages(
         system_prompt=SYSTEM_PROMPT,
         question=question,
-        search_context=None,
         dialog_context=dialog_context,
         dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
     )
@@ -535,7 +494,7 @@ async def _handle_general_question(
     )
     t2_elapsed = time.time() - t2_start
 
-    clean_answer, _ = process_llm_response(response.content)
+    clean_answer = _safe_clean_answer(response.content)
 
     logger.info(
         f"[{req_id}] Phase 2 DONE: general — {t2_elapsed:.1f}s, "

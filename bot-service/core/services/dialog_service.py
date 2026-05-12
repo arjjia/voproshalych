@@ -144,6 +144,7 @@ class DialogService:
         keywords: dict | None = None,
         question_type: int | None = None,
         normalized_context: str | None = None,
+        relevance_type: str | None = None,
     ) -> tuple[DialogMessage | None, DialogMessage | None]:
         """Сохраняет пару вопрос-ответ в историю и связывает их между собой.
 
@@ -156,6 +157,7 @@ class DialogService:
             keywords: Извлечённые ключевые слова (high_level, low_level).
             question_type: Тип вопроса (1=БЗ, 2=система, 3=общий).
             normalized_context: Нормализованный контекст для поиска.
+            relevance_type: Тип релевантности контекста (a/b).
 
         Returns:
             tuple[DialogMessage | None, DialogMessage | None]:
@@ -190,6 +192,7 @@ class DialogService:
                     expanded_query=expanded_query,
                     keywords=keywords_json,
                     normalized_context=normalized_context,
+                    relevance_type=relevance_type,
                 )
             )
             (

@@ -272,6 +272,8 @@ def build_inline_keyboard(
 ) -> InlineKeyboardMarkup | None:
     """Преобразует кнопки из ответа core в Telegram inline keyboard.
 
+    Поддерживает callback-кнопки и URL-кнопки.
+
     Args:
         button_rows: Строки кнопок из ответа core.
 
@@ -284,15 +286,23 @@ def build_inline_keyboard(
 
     inline_keyboard = []
     for row in button_rows:
-        inline_keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=button["text"],
-                    callback_data=button["callback_data"],
+        buttons = []
+        for button in row:
+            if button.get("url"):
+                buttons.append(
+                    InlineKeyboardButton(
+                        text=button["text"],
+                        url=button["url"],
+                    )
                 )
-                for button in row
-            ]
-        )
+            else:
+                buttons.append(
+                    InlineKeyboardButton(
+                        text=button["text"],
+                        callback_data=button.get("callback_data", ""),
+                    )
+                )
+        inline_keyboard.append(buttons)
 
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 

@@ -72,8 +72,9 @@ class QAServiceClient:
                 - expanded_query: str | None — расширенный запрос
                 - keywords: dict | None — извлечённые ключевые слова
                 - model: str — модель
-                - sources: list[str] — URL источников
+                - sources: list[dict] — источники для кнопок ({url, label})
                 - question_type: int — тип вопроса (1/2/3)
+                - relevance_type: str | None — тип релевантности контекста (a/b)
 
         Raises:
             QAServiceError: При ошибке запроса.
@@ -96,6 +97,7 @@ class QAServiceClient:
             "model": payload.get("model", ""),
             "sources": payload.get("sources", []),
             "question_type": payload.get("question_type", 1),
+            "relevance_type": payload.get("relevance_type"),
         }
 
     def generate_holiday_greeting(

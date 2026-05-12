@@ -27,6 +27,7 @@ class LLMPool:
         """
         self._config = config or get_llm_config()
         self._providers: dict[str, BaseLLMProvider] = {}
+        self._warmed_up = False
         self._init_providers()
 
     def _init_providers(self) -> None:
@@ -40,6 +41,19 @@ class LLMPool:
             ),
         }
         logger.debug(f"LLM providers initialized: {list(self._providers.keys())}")
+
+    async def warmup(self) -> None:
+        """Прогреть соединения всех доступных провайдеров."""
+        if self._warmed_up:
+            return
+        self._warmed_up = True
+        for name, provider in self._providers.items():
+            if hasattr(provider, "warmup") and provider.is_available():
+                logger.info(f"Warming up {name} provider...")
+                try:
+                    await provider.warmup()
+                except Exception as e:
+                    logger.warning(f"Warmup failed for {name}: {e}")
 
     def get_available_providers(self) -> list[str]:
         """Получить список доступных провайдеров.

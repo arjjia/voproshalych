@@ -275,19 +275,27 @@ class BotService:
         if self._is_service_command(lowered_text):
             return self._build_service_command_response()
 
-        reply_text = self._handle_dialog_message(normalized_text, user)
+        reply_text, source_buttons = self._handle_dialog_message(normalized_text, user)
+
+        feedback_buttons = self._build_feedback_buttons()
+
+        all_buttons = feedback_buttons
+        if source_buttons:
+            all_buttons = source_buttons + all_buttons
 
         return BotResponse(
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=reply_text,
-                    buttons=self._build_feedback_buttons(),
+                    buttons=all_buttons,
                 )
             ]
         )
 
-    def _handle_dialog_message(self, question: str, user) -> str:
+    def _handle_dialog_message(
+        self, question: str, user
+    ) -> tuple[str, list[list[InlineButton]]]:
         """Обрабатывает пользовательский вопрос с учетом истории диалога.
 
         Args:
@@ -295,7 +303,7 @@ class BotService:
             user: Текущий пользователь из БД.
 
         Returns:
-            str: Ответ QA-сервиса или fallback-текст.
+            Кортеж (текст ответа, inline-кнопки источников).
         """
 
         if user is None:
@@ -323,6 +331,7 @@ class BotService:
             model_used=qa_result.get("model"),
             question_type=qa_result.get("question_type"),
             normalized_context=qa_result.get("context_expanded_query"),
+            relevance_type=qa_result.get("relevance_type"),
         )
         return self._format_qa_answer(qa_result)
 
@@ -375,7 +384,8 @@ class BotService:
             context: История диалога или другой дополнительный контекст.
 
         Returns:
-            dict: Ответ с ключами answer, expanded_query, keywords, model, sources, question_type.
+            dict: Ответ с ключами answer, expanded_query, keywords, model,
+            sources, question_type, relevance_type.
         """
         from services.qa_service_client import (
             QAServiceError,
@@ -403,32 +413,48 @@ class BotService:
             logger.error(f"Unexpected QA error: {e}")
             return {"answer": ANSWER_FAILED}
 
-    def _format_qa_answer(self, qa_result: dict) -> str:
+    def _format_qa_answer(
+        self, qa_result: dict
+    ) -> tuple[str, list[list[InlineButton]]]:
         """Форматирует ответ QA для отправки в мессенджер.
 
-        Добавляет блок "Подробнее:" с ссылками из sources.
-        Удаляет оставшийся markdown (safety-net).
-        Обрезает слишком длинные ответы.
+        Формирует inline-кнопки с URL из sources (SourceLink).
+        Кнопки НЕ добавляются если relevance_type = "b" или sources пустой.
 
         Args:
             qa_result: Ответ от QA-сервиса.
 
         Returns:
-            str: Отформатированный ответ.
+            Кортеж (отформатированный текст, inline-кнопки источников).
         """
         answer = qa_result.get("answer", "")
         sources = qa_result.get("sources", [])
+        relevance_type = qa_result.get("relevance_type")
 
         answer = self._strip_remaining_markdown(answer)
 
-        if sources:
-            link_lines = [f"Подробнее: {url}" for url in sources[:3]]
-            answer = f"{answer}\n\n" + "\n".join(link_lines)
+        source_buttons: list[list[InlineButton]] = []
+
+        if sources and relevance_type == "a":
+            buttons_row = []
+            for src in sources[:3]:
+                if isinstance(src, dict):
+                    url = src.get("url", "")
+                    label = src.get("label", "Подробнее")
+                else:
+                    url = str(src)
+                    label = "Подробнее"
+                if url:
+                    buttons_row.append(
+                        InlineButton(text=label, url=url)
+                    )
+            if buttons_row:
+                source_buttons = [buttons_row]
 
         if len(answer) > 3900:
             answer = answer[:3850] + "\n\n..."
 
-        return answer
+        return answer, source_buttons
 
     def _strip_remaining_markdown(self, text: str) -> str:
         """Удалить оставшийся markdown (safety-net после qa-service)."""

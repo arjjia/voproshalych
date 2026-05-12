@@ -74,11 +74,11 @@ class LLMConfig(BaseSettings):
 
     nemotron_timeout: int = Field(default=120)
     qwen_timeout: int = Field(default=180)
-    mistral_timeout: int = Field(default=90)
+    mistral_timeout: int = Field(default=30)
     gigachat_timeout: int = Field(default=120)
 
-    keyword_extraction_timeout: int = Field(default=30)
-    query_expansion_timeout: int = Field(default=20)
+    keyword_extraction_timeout: int = Field(default=15)
+    query_expansion_timeout: int = Field(default=30)
     answer_generation_timeout: int = Field(default=60)
     graph_building_timeout: int = Field(default=600)
 
