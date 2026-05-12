@@ -87,71 +87,58 @@ flowchart TD
         ROUTE -- "2 bot" --> T2_BUILD
         ROUTE -- "3 general" --> T3_BUILD
 
-        subgraph TYPE1["Type 1: Knowledge Base"]
+        subgraph TYPE1["Type 1 - KB - with context"]
             direction TB
-            T1_SEARCH["Phase 2a: LightRAG search<br/>aquery_data - mode=mix, top_k=5<br/>timeout=50s"]
-            T1_FORMAT["_format_search_context<br/>chunks with source N tags<br/>entities 15, relationships 10"]
+            T1_SEARCH["Phase 2a: LightRAG search mode=mix top_k=5 timeout=50s"]
+            T1_FORMAT["_format_search_context - chunks with source N tags"]
             T1_HAS_CTX{"search_context not empty?"}
-
+            WC_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT_WITH_CONTEXT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ search_context max 1500<br/>+ question max 500"]
+            WC_LLM["llm_pool.call max_tokens=2048"]
+            WC_PARSE["parse_llm_json_response - JSON relevance_type a/b"]
+            WC_REL{"relevance_type?"}
+            WCA_RESULT["relevance=a sources=build_source_links SourceLink url+label"]
+            WCB_RESULT["relevance=b sources=empty 2 sentences"]
             T1_SEARCH --> T1_FORMAT --> T1_HAS_CTX
-            T1_SEARCH -. "Timeout/Exception" .-> T1_HAS_CTX
-
             T1_HAS_CTX -- "yes" --> WC_BUILD
-            T1_HAS_CTX -- "no" --> NC_BUILD
-
-            subgraph T1_WITH_CTX["Type 1 with context: SYSTEM_PROMPT_WITH_CONTEXT to JSON"]
-                direction TB
-                WC_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT_WITH_CONTEXT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ search_context max 1500<br/>+ question max 500"]
-                WC_LLM["llm_pool.call - max_tokens=2048"]
-                WC_PARSE["parse_llm_json_response<br/>JSON: relevance_type, relevant_sources,<br/>irrelevant_sources, answer<br/>Fallback: relevance_type=b"]
-                WC_REL{"relevance_type?"}
-
-                WC_BUILD --> WC_LLM --> WC_PARSE --> WC_REL
-                WC_REL -- "a: relevant" --> WCA_RESULT
-                WC_REL -- "b: irrelevant" --> WCB_RESULT
-
-                WCA_RESULT["relevance=a<br/>sources=build_source_links<br/>SourceLink url + label"]
-                WCB_RESULT["relevance=b<br/>sources=empty<br/>2 sentences: not found + recommendation"]
-            end
-
-            subgraph T1_NO_CTX["Type 1 no context: SYSTEM_PROMPT_NO_CONTEXT"]
-                direction TB
-                NC_BUILD["Payload build_no_context_messages:<br/>system: SYSTEM_PROMPT_NO_CONTEXT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO search_context"]
-                NC_LLM["llm_pool.call - max_tokens=2048"]
-                NC_CLEAN["_safe_clean_answer"]
-                NC_ERR{"LLM returned empty?"}
-                NC_RESULT["relevance=b, sources=empty, 2 sentences"]
-
-                NC_BUILD --> NC_LLM --> NC_CLEAN --> NC_ERR
-                NC_ERR -- "no" --> NC_RESULT
-                NC_ERR -- "yes" .-> ERR_500
-            end
+            WC_BUILD --> WC_LLM --> WC_PARSE --> WC_REL
+            WC_REL -- "a" --> WCA_RESULT
+            WC_REL -- "b" --> WCB_RESULT
         end
 
-        subgraph TYPE2["Type 2: About bot"]
-            direction TB
-            T2_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT_ABOUT_BOT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO search_context"]
-            T2_LLM["llm_pool.call - max_tokens=2048"]
-            T2_CLEAN["_safe_clean_answer"]
-            T2_ERR{"LLM returned empty?"}
-            T2_RESULT["relevance_type=null, sources=empty"]
+        T1_HAS_CTX -. "no" .-> NC_BUILD
+        T1_SEARCH -. "error" .-> T1_HAS_CTX
 
+        NC_BUILD["Type 1 no context - Payload build_no_context_messages<br/>system: SYSTEM_PROMPT_NO_CONTEXT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500 NO search_context"]
+        NC_BUILD --> NC_LLM --> NC_CLEAN --> NC_ERR
+        NC_LLM["llm_pool.call max_tokens=2048"]
+        NC_CLEAN["_safe_clean_answer"]
+        NC_ERR{"LLM empty?"}
+        NC_ERR -- "no" --> NC_RESULT
+        NC_ERR -. "yes" .-> ERR_500
+        NC_RESULT["relevance=b sources=empty 2 sentences"]
+
+        subgraph TYPE2["Type 2 - About bot"]
+            direction TB
+            T2_BUILD["Payload: system=SYSTEM_PROMPT_ABOUT_BOT<br/>user: GOLDEN_CHUNKS max 800<br/>+ DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500 NO search_context"]
+            T2_LLM["llm_pool.call max_tokens=2048"]
+            T2_CLEAN["_safe_clean_answer"]
+            T2_ERR{"LLM empty?"}
+            T2_RESULT["relevance_type=null sources=empty"]
             T2_BUILD --> T2_LLM --> T2_CLEAN --> T2_ERR
             T2_ERR -- "no" --> T2_RESULT
-            T2_ERR -- "yes" .-> ERR_500
+            T2_ERR -. "yes" .-> ERR_500
         end
 
-        subgraph TYPE3["Type 3: General question"]
+        subgraph TYPE3["Type 3 - General"]
             direction TB
-            T3_BUILD["Payload build_messages:<br/>system: SYSTEM_PROMPT<br/>user: DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO GOLDEN_CHUNKS, NO search_context"]
-            T3_LLM["llm_pool.call - max_tokens=2048"]
+            T3_BUILD["Payload: system=SYSTEM_PROMPT<br/>user: DIALOG_CONTEXT_PROMPT + context max 1200<br/>+ question max 500<br/>NO GOLDEN_CHUNKS NO search_context"]
+            T3_LLM["llm_pool.call max_tokens=2048"]
             T3_CLEAN["_safe_clean_answer"]
-            T3_ERR{"LLM returned empty?"}
-            T3_RESULT["relevance_type=null, sources=empty"]
-
+            T3_ERR{"LLM empty?"}
+            T3_RESULT["relevance_type=null sources=empty"]
             T3_BUILD --> T3_LLM --> T3_CLEAN --> T3_ERR
             T3_ERR -- "no" --> T3_RESULT
-            T3_ERR -- "yes" .-> ERR_500
+            T3_ERR -. "yes" .-> ERR_500
         end
 
         WCA_RESULT --> QAR
