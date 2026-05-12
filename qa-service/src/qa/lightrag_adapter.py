@@ -485,29 +485,25 @@ async def create_lightrag_instance():
 
 _CHUNK_MERGE_PATCHED = False
 
+_CFG_A_VECTOR_WEIGHT = 1.2
+_CFG_A_ENTITY_WEIGHT = 0.8
+_CFG_A_RELATION_WEIGHT = 0.6
+_CFG_A_GRAPH_ONLY_PENALTY = 0.9
+_CFG_A_VECTOR_CONFIRM_BOOST = 1.15
+_CFG_A_FREQ_GAMMA = 0.35
+_CFG_A_FREQ_CAP = 3.0
+
 
 def _patch_merge_chunks():
-    """Заменить round-robin слияние на настраиваемый merge.
+    """Заменить round-robin слияние LightRAG на score-based cfgA.
 
-    Поддерживаемые стратегии (MERGE_PRESET env):
-    - round_robin: дефолтный LightRAG round-robin (CHUNK_MERGE=round_robin)
-    - rrf: Reciprocal Rank Fusion (индустриальный стандарт)
-    - conditional: вектор-only при высокой уверенности, RRF при низкой
-    - score_tuned/cfg_a/cfg_b: score-based merge с разными весами
-
-    Дополнительные env-переменные:
-    - ENTITY_DEGREE_MAX: фильтр generic-сущностей (degree > N), 0=выкл
-    - RRF_K: константа RRF (default 60)
-    - CONDITIONAL_THRESHOLD: cosine-порог для vector confidence (default 0.85)
-    - CONDITIONAL_MIN_VECTOR: мин. число vector-результатов для confidence (default 5)
+    Веса cfgA (по результатам бенчмарков):
+    - vector: 1.2, entity: 0.8, relation: 0.6
+    - graph_only_penalty: 0.9, vector_confirm_boost: 1.15
+    - freq_gamma: 0.35, freq_cap: 3.0
     """
     global _CHUNK_MERGE_PATCHED
     if _CHUNK_MERGE_PATCHED:
-        return
-
-    if os.getenv("CHUNK_MERGE", "").lower() == "round_robin":
-        logger.info("LightRAG _merge_all_chunks: round-robin (default, no patch)")
-        _CHUNK_MERGE_PATCHED = True
         return
 
     import lightrag.operate as operate_mod
@@ -525,41 +521,7 @@ def _patch_merge_chunks():
             "chunk_id": cid,
         }
 
-    def _rrf_merge(
-        vector_chunks: list,
-        entity_chunks: list,
-        relation_chunks: list,
-        rrf_k: int = 60,
-    ) -> list[dict]:
-        scored: dict[str, dict] = {}
-        for rank, chunk in enumerate(vector_chunks):
-            c = _cid(chunk)
-            if not c:
-                continue
-            if c not in scored:
-                scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
-            scored[c]["_s"] += 1.0 / (rrf_k + rank + 1)
-
-        for rank, chunk in enumerate(entity_chunks):
-            c = _cid(chunk)
-            if not c:
-                continue
-            if c not in scored:
-                scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
-            scored[c]["_s"] += 1.0 / (rrf_k + rank + 1)
-
-        for rank, chunk in enumerate(relation_chunks):
-            c = _cid(chunk)
-            if not c:
-                continue
-            if c not in scored:
-                scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
-            scored[c]["_s"] += 1.0 / (rrf_k + rank + 1)
-
-        merged = sorted(scored.values(), key=lambda x: -x["_s"])
-        return [item["_r"] for item in merged]
-
-    async def _universal_merge(
+    async def _cfg_a_merge(
         filtered_entities,
         filtered_relations,
         vector_chunks,
@@ -573,21 +535,6 @@ def _patch_merge_chunks():
     ):
         if chunk_tracking is None:
             chunk_tracking = {}
-
-        entity_degree_max = int(os.getenv("ENTITY_DEGREE_MAX", "0"))
-        if entity_degree_max > 0 and filtered_entities:
-            before = len(filtered_entities)
-            filtered_entities = [
-                e
-                for e in filtered_entities
-                if (e.get("rank") or 0) <= entity_degree_max
-            ]
-            logger.info(
-                "Entity degree filter: max=%d, %d/%d kept",
-                entity_degree_max,
-                len(filtered_entities),
-                before,
-            )
 
         entity_chunks = []
         if filtered_entities and text_chunks_db:
@@ -615,267 +562,13 @@ def _patch_merge_chunks():
                 query_embedding=query_embedding,
             )
 
-        merge_preset = os.getenv("MERGE_PRESET", "score_cfg_a").lower().strip()
-
-        if merge_preset == "rrf":
-            rrf_k = int(os.getenv("RRF_K", "60"))
-            merged = _rrf_merge(
-                vector_chunks, entity_chunks, relation_chunks, rrf_k
-            )
-            logger.info(
-                "RRF merge (k=%d): %d+%d+%d -> %d",
-                rrf_k,
-                len(vector_chunks),
-                len(entity_chunks),
-                len(relation_chunks),
-                len(merged),
-            )
-            return merged
-
-        if merge_preset == "conditional":
-            threshold = float(
-                os.getenv("CONDITIONAL_THRESHOLD", "0.85")
-            )
-            min_vec = int(os.getenv("CONDITIONAL_MIN_VECTOR", "5"))
-
-            if (
-                vector_chunks
-                and query_embedding is not None
-                and len(vector_chunks) >= min_vec
-            ):
-                try:
-                    top1_content = vector_chunks[0].get("content", "")[:500]
-                    emb_func = getattr(text_chunks_db, "embedding_func", None)
-                    if top1_content and emb_func:
-                        chunk_embs = await emb_func([top1_content])
-                        chunk_emb = np.array(chunk_embs[0])
-                        q_emb = np.array(query_embedding)
-                        cos_sim = float(
-                            np.dot(q_emb, chunk_emb)
-                            / (
-                                np.linalg.norm(q_emb)
-                                * np.linalg.norm(chunk_emb)
-                                + 1e-10
-                            )
-                        )
-                        logger.info(
-                            "Conditional: top-1 cosine=%.4f, "
-                            "threshold=%.2f",
-                            cos_sim,
-                            threshold,
-                        )
-                        if cos_sim >= threshold:
-                            merged = [
-                                _res(c, _cid(c))
-                                for c in vector_chunks
-                                if _cid(c)
-                            ]
-                            logger.info(
-                                "Conditional: confident (cos=%.4f), "
-                                "vector-only (%d)",
-                                cos_sim,
-                                len(merged),
-                            )
-                            return merged
-                except Exception as e:
-                    logger.warning(
-                        "Conditional: cosine check failed: %s", e
-                    )
-
-            if len(vector_chunks) >= min_vec:
-                merged = [
-                    _res(c, _cid(c))
-                    for c in vector_chunks
-                    if _cid(c)
-                ]
-                logger.info(
-                    "Conditional: vector confident (%d>=%d), "
-                    "vector-only",
-                    len(vector_chunks),
-                    min_vec,
-                )
-                return merged
-
-            merged = _rrf_merge(
-                vector_chunks, entity_chunks, relation_chunks
-            )
-            logger.info(
-                "Conditional: uncertain (%d<%d), RRF merge -> %d",
-                len(vector_chunks),
-                min_vec,
-                len(merged),
-            )
-            return merged
-
-        if merge_preset == "adaptive_hybrid":
-            ah_threshold = float(
-                os.getenv("ADAPTIVE_HYBRID_THRESHOLD", "0.4")
-            )
-            ah_graph_weight = float(
-                os.getenv("ADAPTIVE_HYBRID_GRAPH_WEIGHT", "0.7")
-            )
-            rrf_k = int(os.getenv("RRF_K", "60"))
-
-            use_rrf = True
-
-            if vector_chunks and query_embedding is not None:
-                try:
-                    top1_content = vector_chunks[0].get("content", "")[:500]
-                    emb_func = getattr(text_chunks_db, "embedding_func", None)
-                    if top1_content and emb_func:
-                        chunk_embs = await emb_func([top1_content])
-                        chunk_emb = np.array(chunk_embs[0])
-                        q_emb = np.array(query_embedding)
-                        cos_sim = float(
-                            np.dot(q_emb, chunk_emb)
-                            / (
-                                np.linalg.norm(q_emb)
-                                * np.linalg.norm(chunk_emb)
-                                + 1e-10
-                            )
-                        )
-                        if cos_sim >= ah_threshold:
-                            use_rrf = False
-                            logger.info(
-                                "AdaptiveHybrid: confident (cos=%.4f>=%.2f), "
-                                "vector-only (%d)",
-                                cos_sim,
-                                ah_threshold,
-                                len(vector_chunks),
-                            )
-                        else:
-                            logger.info(
-                                "AdaptiveHybrid: uncertain (cos=%.4f<%.2f), "
-                                "weighted RRF (graph_w=%.2f)",
-                                cos_sim,
-                                ah_threshold,
-                                ah_graph_weight,
-                            )
-                except Exception as e:
-                    logger.warning(
-                        "AdaptiveHybrid: cosine check failed: %s", e
-                    )
-
-            if not use_rrf:
-                merged = [
-                    _res(c, _cid(c)) for c in vector_chunks if _cid(c)
-                ]
-                return merged
-
-            vec_w = 1.0 - ah_graph_weight
-            graph_w = ah_graph_weight / 2.0
-            scored: dict[str, dict] = {}
-            for rank, chunk in enumerate(vector_chunks):
-                c = _cid(chunk)
-                if not c:
-                    continue
-                if c not in scored:
-                    scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
-                scored[c]["_s"] += vec_w / (rrf_k + rank + 1)
-
-            for rank, chunk in enumerate(entity_chunks):
-                c = _cid(chunk)
-                if not c:
-                    continue
-                if c not in scored:
-                    scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
-                scored[c]["_s"] += graph_w / (rrf_k + rank + 1)
-
-            for rank, chunk in enumerate(relation_chunks):
-                c = _cid(chunk)
-                if not c:
-                    continue
-                if c not in scored:
-                    scored[c] = {"_r": _res(chunk, c), "_s": 0.0}
-                scored[c]["_s"] += graph_w / (rrf_k + rank + 1)
-
-            merged = sorted(scored.values(), key=lambda x: -x["_s"])
-            result = [item["_r"] for item in merged]
-            logger.info(
-                "AdaptiveHybrid: weighted RRF %d+%d+%d -> %d",
-                len(vector_chunks),
-                len(entity_chunks),
-                len(relation_chunks),
-                len(result),
-            )
-            return result
-
-        preset_values = {
-            "score_tuned": {
-                "MERGE_W_VECTOR": "1.0",
-                "MERGE_W_ENTITY": "1.0",
-                "MERGE_W_RELATION": "1.0",
-                "MERGE_GRAPH_ONLY_PENALTY": "1.0",
-                "MERGE_VECTOR_CONFIRM_BOOST": "1.1",
-            },
-            "score_cfg_a": {
-                "MERGE_W_VECTOR": "1.2",
-                "MERGE_W_ENTITY": "0.8",
-                "MERGE_W_RELATION": "0.6",
-                "MERGE_GRAPH_ONLY_PENALTY": "0.9",
-                "MERGE_VECTOR_CONFIRM_BOOST": "1.15",
-            },
-            "score_cfg_b": {
-                "MERGE_W_VECTOR": "1.1",
-                "MERGE_W_ENTITY": "1.0",
-                "MERGE_W_RELATION": "1.0",
-                "MERGE_GRAPH_ONLY_PENALTY": "0.9",
-                "MERGE_VECTOR_CONFIRM_BOOST": "1.2",
-            },
-        }
-        if merge_preset not in preset_values:
-            logger.warning(
-                "Unknown MERGE_PRESET='%s', fallback to 'score_tuned'",
-                merge_preset,
-            )
-            merge_preset = "score_tuned"
-
-        preset = preset_values[merge_preset]
-
-        vector_weight = float(
-            os.getenv("MERGE_W_VECTOR", preset["MERGE_W_VECTOR"])
-        )
-        entity_weight = float(
-            os.getenv("MERGE_W_ENTITY", preset["MERGE_W_ENTITY"])
-        )
-        relation_weight = float(
-            os.getenv("MERGE_W_RELATION", preset["MERGE_W_RELATION"])
-        )
-        freq_gamma = float(os.getenv("MERGE_FREQ_GAMMA", "0.35"))
-        freq_cap = float(os.getenv("MERGE_FREQ_CAP", "3.0"))
-        graph_only_penalty = float(
-            os.getenv(
-                "MERGE_GRAPH_ONLY_PENALTY",
-                preset["MERGE_GRAPH_ONLY_PENALTY"],
-            )
-        )
-        vector_confirm_boost = float(
-            os.getenv(
-                "MERGE_VECTOR_CONFIRM_BOOST",
-                preset["MERGE_VECTOR_CONFIRM_BOOST"],
-            )
-        )
-
-        logger.info(
-            "Score merge preset='%s': wv=%.2f we=%.2f wr=%.2f "
-            "gamma=%.2f cap=%.2f penalty=%.2f boost=%.2f",
-            merge_preset,
-            vector_weight,
-            entity_weight,
-            relation_weight,
-            freq_gamma,
-            freq_cap,
-            graph_only_penalty,
-            vector_confirm_boost,
-        )
-
         def _freq_bonus(chunk_id: str) -> float:
             freq = int(
                 chunk_tracking.get(chunk_id, {}).get("frequency", 1) or 1
             )
             return min(
-                freq_cap,
-                1.0 + freq_gamma * math.log1p(max(freq - 1, 0)),
+                _CFG_A_FREQ_CAP,
+                1.0 + _CFG_A_FREQ_GAMMA * math.log1p(max(freq - 1, 0)),
             )
 
         def _rr_pos(position: int, offset: int) -> float:
@@ -887,7 +580,7 @@ def _patch_merge_chunks():
             c = _cid(chunk)
             if not c:
                 continue
-            score = vector_weight * _rr_pos(pos, 1)
+            score = _CFG_A_VECTOR_WEIGHT * _rr_pos(pos, 1)
             prev = scored.get(c)
             if prev is None or prev["_score"] < score:
                 scored[c] = {
@@ -902,19 +595,21 @@ def _patch_merge_chunks():
             c = _cid(chunk)
             if not c:
                 continue
-            score = entity_weight * _rr_pos(pos, 2) * _freq_bonus(c)
+            score = _CFG_A_ENTITY_WEIGHT * _rr_pos(pos, 2) * _freq_bonus(c)
             prev = scored.get(c)
             if prev is None:
                 scored[c] = {
                     "content": chunk["content"],
                     "file_path": chunk.get("file_path", "unknown_source"),
                     "chunk_id": c,
-                    "_score": score * graph_only_penalty,
+                    "_score": score * _CFG_A_GRAPH_ONLY_PENALTY,
                     "_from_vector": False,
                 }
             else:
                 boost = (
-                    vector_confirm_boost if prev.get("_from_vector") else 1.0
+                    _CFG_A_VECTOR_CONFIRM_BOOST
+                    if prev.get("_from_vector")
+                    else 1.0
                 )
                 prev["_score"] += score * boost
 
@@ -922,19 +617,21 @@ def _patch_merge_chunks():
             c = _cid(chunk)
             if not c:
                 continue
-            score = relation_weight * _rr_pos(pos, 3) * _freq_bonus(c)
+            score = _CFG_A_RELATION_WEIGHT * _rr_pos(pos, 3) * _freq_bonus(c)
             prev = scored.get(c)
             if prev is None:
                 scored[c] = {
                     "content": chunk["content"],
                     "file_path": chunk.get("file_path", "unknown_source"),
                     "chunk_id": c,
-                    "_score": score * graph_only_penalty,
+                    "_score": score * _CFG_A_GRAPH_ONLY_PENALTY,
                     "_from_vector": False,
                 }
             else:
                 boost = (
-                    vector_confirm_boost if prev.get("_from_vector") else 1.0
+                    _CFG_A_VECTOR_CONFIRM_BOOST
+                    if prev.get("_from_vector")
+                    else 1.0
                 )
                 prev["_score"] += score * boost
 
@@ -949,17 +646,18 @@ def _patch_merge_chunks():
             item.pop("_from_vector", None)
 
         logger.info(
-            "Score merge '%s': %d -> %d (dedup %d)",
-            merge_preset,
-            origin_len,
+            "Score merge cfgA: %d+%d+%d -> %d (dedup %d)",
+            len(vector_chunks),
+            len(entity_chunks),
+            len(relation_chunks),
             len(merged),
             origin_len - len(merged),
         )
         return merged
 
-    operate_mod._merge_all_chunks = _universal_merge
+    operate_mod._merge_all_chunks = _cfg_a_merge
     _CHUNK_MERGE_PATCHED = True
-    logger.info("LightRAG _merge_all_chunks patched: universal merge")
+    logger.info("LightRAG _merge_all_chunks patched: score merge cfgA")
 
 
 def _extract_file_paths_from_search_data(
