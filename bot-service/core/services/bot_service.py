@@ -322,7 +322,7 @@ class BotService:
             question=question,
             context=history or None,
         )
-            self._dialog_service.save_question_answer(
+        self._dialog_service.save_question_answer(
                 session_id=dialog_session.id,
                 question=question,
                 answer=qa_result.get("answer", ""),
