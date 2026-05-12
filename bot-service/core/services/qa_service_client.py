@@ -74,7 +74,7 @@ class QAServiceClient:
                 - model: str — модель
                 - sources: list[dict] — источники для кнопок ({url, label})
                 - question_type: int — тип вопроса (1/2/3)
-                - relevance_type: str | None — тип релевантности контекста (a/b)
+                - relevant_sources: list[int] | None — номера релевантных источников
 
         Raises:
             QAServiceError: При ошибке запроса.
@@ -97,7 +97,7 @@ class QAServiceClient:
             "model": payload.get("model", ""),
             "sources": payload.get("sources", []),
             "question_type": payload.get("question_type", 1),
-            "relevance_type": payload.get("relevance_type"),
+            "relevant_sources": payload.get("relevant_sources"),
         }
 
     def generate_holiday_greeting(

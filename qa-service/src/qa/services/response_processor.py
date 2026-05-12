@@ -15,24 +15,18 @@ class ParsedLLMResponse:
     """Результат парсинга ответа LLM для type=1 (БЗ).
 
     Attributes:
-        relevance_type: «a» (релевантный контекст) или «b» (нерелевантный).
         relevant_sources: Номера релевантных источников.
-        irrelevant_sources: Номера нерелевантных источников.
         answer: Чистый текст ответа.
     """
 
-    __slots__ = ("relevance_type", "relevant_sources", "irrelevant_sources", "answer")
+    __slots__ = ("relevant_sources", "answer")
 
     def __init__(
         self,
-        relevance_type: str = "b",
         relevant_sources: list[int] | None = None,
-        irrelevant_sources: list[int] | None = None,
         answer: str = "",
     ):
-        self.relevance_type = relevance_type
         self.relevant_sources = relevant_sources or []
-        self.irrelevant_sources = irrelevant_sources or []
         self.answer = answer
 
 
@@ -41,9 +35,7 @@ def parse_llm_json_response(raw_answer: str) -> ParsedLLMResponse:
 
     Ожидаемый формат:
     {
-      "relevance_type": "a" | "b",
       "relevant_sources": [1, 3],
-      "irrelevant_sources": [2, 4, 5],
       "answer": "текст ответа"
     }
 
@@ -65,26 +57,14 @@ def parse_llm_json_response(raw_answer: str) -> ParsedLLMResponse:
                 f"'{raw_answer[:200]}'"
             )
             cleaned = clean_markdown(raw_answer)
-            return ParsedLLMResponse(
-                relevance_type="b",
-                answer=cleaned,
-            )
+            return ParsedLLMResponse(answer=cleaned)
 
         parsed = json.loads(json_match.group())
-
-        rel_type = parsed.get("relevance_type", "b")
-        if rel_type not in ("a", "b"):
-            rel_type = "b"
 
         relevant = parsed.get("relevant_sources", [])
         if not isinstance(relevant, list):
             relevant = []
         relevant = [int(x) for x in relevant if isinstance(x, (int, str)) and str(x).isdigit()]
-
-        irrelevant = parsed.get("irrelevant_sources", [])
-        if not isinstance(irrelevant, list):
-            irrelevant = []
-        irrelevant = [int(x) for x in irrelevant if isinstance(x, (int, str)) and str(x).isdigit()]
 
         answer = parsed.get("answer", "")
         if not isinstance(answer, str) or not answer.strip():
@@ -93,51 +73,41 @@ def parse_llm_json_response(raw_answer: str) -> ParsedLLMResponse:
         answer = clean_markdown(answer)
 
         logger.info(
-            f"[PARSE_JSON] type={rel_type}, "
-            f"relevant={relevant}, irrelevant={irrelevant}, "
+            f"[PARSE_JSON] relevant={relevant}, "
             f"answer_len={len(answer)}"
         )
 
         return ParsedLLMResponse(
-            relevance_type=rel_type,
             relevant_sources=relevant,
-            irrelevant_sources=irrelevant,
             answer=answer,
         )
 
     except (json.JSONDecodeError, Exception) as e:
         logger.warning(f"[PARSE_JSON] Failed: {e}, raw='{raw_answer[:200]}'")
         cleaned = clean_markdown(raw_answer)
-        return ParsedLLMResponse(
-            relevance_type="b",
-            answer=cleaned,
-        )
+        return ParsedLLMResponse(answer=cleaned)
 
 
 def _parse_structured_text_fallback(raw_answer: str) -> ParsedLLMResponse | None:
     """Распарсить псевдо-структурированный ответ без JSON.
 
     Некоторые модели могут вернуть формат вида:
-    relevance_type: "b"
-    relevant_sources: []
-    irrelevant_sources: []
+    relevant_sources: [1, 3]
     answer: "..."
     """
-    rel_type_match = re.search(
-        r"relevance_type\s*:\s*['\"]?([ab])['\"]?",
-        raw_answer,
-        flags=re.IGNORECASE,
-    )
     answer_match = re.search(
         r"answer\s*:\s*['\"](.+?)['\"]\s*$",
         raw_answer,
         flags=re.IGNORECASE | re.DOTALL,
     )
 
-    if not rel_type_match and not answer_match:
+    has_sources = bool(
+        re.search(r"relevant_sources\s*:\s*\[", raw_answer, flags=re.IGNORECASE)
+    )
+
+    if not has_sources and not answer_match:
         return None
 
-    rel_type = (rel_type_match.group(1).lower() if rel_type_match else "b")
     answer = answer_match.group(1).strip() if answer_match else raw_answer
 
     relevant_sources = [
@@ -149,26 +119,14 @@ def _parse_structured_text_fallback(raw_answer: str) -> ParsedLLMResponse | None
         )[:1]
         for x in re.findall(r"\d+", x)
     ]
-    irrelevant_sources = [
-        int(x)
-        for x in re.findall(
-            r"irrelevant_sources\s*:\s*\[([^\]]*)\]",
-            raw_answer,
-            flags=re.IGNORECASE,
-        )[:1]
-        for x in re.findall(r"\d+", x)
-    ]
 
     cleaned_answer = clean_markdown(answer)
     logger.info(
         f"[PARSE_JSON] Fallback parsed structured text: "
-        f"type={rel_type}, relevant={relevant_sources}, "
-        f"irrelevant={irrelevant_sources}, answer_len={len(cleaned_answer)}"
+        f"relevant={relevant_sources}, answer_len={len(cleaned_answer)}"
     )
     return ParsedLLMResponse(
-        relevance_type=rel_type if rel_type in ("a", "b") else "b",
         relevant_sources=relevant_sources,
-        irrelevant_sources=irrelevant_sources,
         answer=cleaned_answer,
     )
 

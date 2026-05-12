@@ -322,17 +322,17 @@ class BotService:
             question=question,
             context=history or None,
         )
-        self._dialog_service.save_question_answer(
-            session_id=dialog_session.id,
-            question=question,
-            answer=qa_result.get("answer", ""),
-            expanded_query=qa_result.get("expanded_query"),
-            keywords=qa_result.get("keywords"),
-            model_used=qa_result.get("model"),
-            question_type=qa_result.get("question_type"),
-            normalized_context=qa_result.get("context_expanded_query"),
-            relevance_type=qa_result.get("relevance_type"),
-        )
+            self._dialog_service.save_question_answer(
+                session_id=dialog_session.id,
+                question=question,
+                answer=qa_result.get("answer", ""),
+                expanded_query=qa_result.get("expanded_query"),
+                keywords=qa_result.get("keywords"),
+                model_used=qa_result.get("model"),
+                question_type=qa_result.get("question_type"),
+                normalized_context=qa_result.get("context_expanded_query"),
+                relevant_sources=qa_result.get("relevant_sources"),
+            )
         return self._format_qa_answer(qa_result)
 
     def _handle_voice_message(self, message: IncomingMessage) -> BotResponse:
@@ -385,7 +385,7 @@ class BotService:
 
         Returns:
             dict: Ответ с ключами answer, expanded_query, keywords, model,
-            sources, question_type, relevance_type.
+            sources, question_type, relevant_sources.
         """
         from services.qa_service_client import (
             QAServiceError,
@@ -419,7 +419,7 @@ class BotService:
         """Форматирует ответ QA для отправки в мессенджер.
 
         Формирует inline-кнопки с URL из sources (SourceLink).
-        Кнопки НЕ добавляются если relevance_type = "b" или sources пустой.
+        Кнопки добавляются только если sources не пустой.
 
         Args:
             qa_result: Ответ от QA-сервиса.
@@ -429,13 +429,12 @@ class BotService:
         """
         answer = qa_result.get("answer", "")
         sources = qa_result.get("sources", [])
-        relevance_type = qa_result.get("relevance_type")
 
         answer = self._strip_remaining_markdown(answer)
 
         source_buttons: list[list[InlineButton]] = []
 
-        if sources and relevance_type == "a":
+        if sources:
             buttons_row = []
             for src in sources[:3]:
                 if isinstance(src, dict):

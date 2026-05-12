@@ -90,7 +90,7 @@ class DialogService:
         finally:
             session.close()
 
-    def build_context(self, session_id: int, max_messages: int = 3, max_chars: int = 3000) -> str:
+    def build_context(self, session_id: int, max_messages: int = 3, max_chars: int = 1500) -> str:
         """Собирает последние сообщения текущей сессии в текстовый контекст.
 
         Берёт до max_messages последних пар вопрос-ответ (сначала user, потом bot).
@@ -99,7 +99,7 @@ class DialogService:
         Args:
             session_id: Идентификатор сессии.
             max_messages: Максимум пар вопрос-ответ (по умолчанию 3).
-            max_chars: Максимум символов в контексте (по умолчанию 3000).
+            max_chars: Максимум символов в контексте (по умолчанию 1500).
 
         Returns:
             str: Текст контекста или пустая строка.
@@ -144,7 +144,7 @@ class DialogService:
         keywords: dict | None = None,
         question_type: int | None = None,
         normalized_context: str | None = None,
-        relevance_type: str | None = None,
+        relevant_sources: list[int] | None = None,
     ) -> tuple[DialogMessage | None, DialogMessage | None]:
         """Сохраняет пару вопрос-ответ в историю и связывает их между собой.
 
@@ -157,7 +157,7 @@ class DialogService:
             keywords: Извлечённые ключевые слова (high_level, low_level).
             question_type: Тип вопроса (1=БЗ, 2=система, 3=общий).
             normalized_context: Нормализованный контекст для поиска.
-            relevance_type: Тип релевантности контекста (a/b).
+            relevant_sources: Список релевантных источников.
 
         Returns:
             tuple[DialogMessage | None, DialogMessage | None]:
@@ -184,6 +184,7 @@ class DialogService:
             session.flush()
 
             keywords_json = json.dumps(keywords, ensure_ascii=False) if keywords else None
+            relevant_sources_json = json.dumps(relevant_sources, ensure_ascii=False) if relevant_sources else None
 
             session.add(
                 QuestionAnswerLink(
@@ -192,7 +193,7 @@ class DialogService:
                     expanded_query=expanded_query,
                     keywords=keywords_json,
                     normalized_context=normalized_context,
-                    relevance_type=relevance_type,
+                    relevant_sources=relevant_sources_json,
                 )
             )
             (

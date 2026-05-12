@@ -1,4 +1,4 @@
-"""API роут для QA с JSON-ответом LLM и классификацией релевантности."""
+"""API роут для QA с JSON-ответом LLM."""
 
 import asyncio
 import logging
@@ -10,7 +10,6 @@ from fastapi import APIRouter, Header, HTTPException
 
 from ...config.prompts import (
     DIALOG_CONTEXT_PROMPT,
-    GOLDEN_CHUNKS,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_NO_CONTEXT,
     SYSTEM_PROMPT_ABOUT_BOT,
@@ -232,9 +231,8 @@ async def ask_question(
                 f"[{req_id}] {'=' * 60}\n"
                 f"[{req_id}] COMPLETE — {total_elapsed:.1f}s, "
                 f"type={question_type}, "
-                f"relevance={result.relevance_type}, "
-                f"answer_len={len(result.answer)}, "
-                f"sources={len(result.sources)}\n"
+                f"sources={len(result.sources)}, "
+                f"answer_len={len(result.answer)}\n"
                 f"[{req_id}] {'=' * 60}"
             )
 
@@ -325,7 +323,6 @@ async def _handle_kb_question(
         search_context=search_context,
         dialog_context=dialog_context,
         dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
-        golden_chunks=GOLDEN_CHUNKS,
     )
 
     logger.info(
@@ -350,26 +347,22 @@ async def _handle_kb_question(
     # ── Парсинг JSON ответа ──
     parsed = parse_llm_json_response(raw_answer)
 
-    relevance_type = parsed.relevance_type
     answer = format_answer(parsed.answer)
 
-    # ── Формирование источников (inline-кнопки) ──
     source_links: list[SourceLink] = []
 
-    if relevance_type == "a" and parsed.relevant_sources:
+    if parsed.relevant_sources:
         source_links = build_source_links(parsed.relevant_sources, source_index)
 
     logger.info(
-        f"[{req_id}] Parsed: relevance={relevance_type}, "
+        f"[{req_id}] Parsed: "
         f"relevant={parsed.relevant_sources}, "
-        f"irrelevant={parsed.irrelevant_sources}, "
         f"source_links={len(source_links)}"
     )
 
     total_elapsed = time.time() - start_time
     logger.info(
-        f"[{req_id}] Pipeline DONE: {total_elapsed:.1f}s, "
-        f"relevance={relevance_type}"
+        f"[{req_id}] Pipeline DONE: {total_elapsed:.1f}s"
     )
 
     return QAResponse(
@@ -377,7 +370,7 @@ async def _handle_kb_question(
         model=response.model,
         sources=source_links,
         keywords=keywords,
-        relevance_type=relevance_type,
+        relevant_sources=parsed.relevant_sources,
     )
 
 
@@ -390,10 +383,7 @@ async def _generate_no_kb_answer(
     start_time: float,
     keywords: dict,
 ) -> QAResponse:
-    """Генерация ответа без контекста из БЗ (SYSTEM_PROMPT_NO_CONTEXT).
-
-    Логика ответа идентична типу B (нерелевантный контекст).
-    """
+    """Генерация ответа без контекста из БЗ (SYSTEM_PROMPT_NO_CONTEXT)."""
     logger.info(f"[{req_id}] Generating answer with SYSTEM_PROMPT_NO_CONTEXT")
 
     messages = build_no_context_messages(
@@ -401,7 +391,6 @@ async def _generate_no_kb_answer(
         question=original_question,
         dialog_context=dialog_context,
         dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
-        golden_chunks=GOLDEN_CHUNKS,
     )
 
     response = await asyncio.wait_for(
@@ -421,7 +410,6 @@ async def _generate_no_kb_answer(
         model=response.model,
         sources=[],
         keywords=keywords,
-        relevance_type="b",
     )
 
 
@@ -442,7 +430,6 @@ async def _handle_system_question(
         question=question,
         dialog_context=dialog_context,
         dialog_context_prompt=DIALOG_CONTEXT_PROMPT,
-        golden_chunks=GOLDEN_CHUNKS,
     )
 
     logger.info(f"[{req_id}] Phase 2 START: system question, no search")

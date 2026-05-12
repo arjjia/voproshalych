@@ -138,6 +138,7 @@ class QuestionAnswerLink(Base):
     keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalized_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     relevance_type: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    relevant_sources: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),
