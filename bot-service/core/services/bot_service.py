@@ -435,7 +435,6 @@ class BotService:
         source_buttons: list[list[InlineButton]] = []
 
         if sources:
-            buttons_row = []
             for src in sources[:3]:
                 if isinstance(src, dict):
                     url = src.get("url", "")
@@ -444,11 +443,9 @@ class BotService:
                     url = str(src)
                     label = "Подробнее"
                 if url:
-                    buttons_row.append(
-                        InlineButton(text=label, url=url)
+                    source_buttons.append(
+                        [InlineButton(text=label, url=url)]
                     )
-            if buttons_row:
-                source_buttons = [buttons_row]
 
         if len(answer) > 3900:
             answer = answer[:3850] + "\n\n..."

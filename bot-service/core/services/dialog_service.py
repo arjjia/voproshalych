@@ -90,7 +90,7 @@ class DialogService:
         finally:
             session.close()
 
-    def build_context(self, session_id: int, max_messages: int = 3, max_chars: int = 1500) -> str:
+    def build_context(self, session_id: int, max_messages: int = 3, max_chars: int = 300) -> str:
         """Собирает последние сообщения текущей сессии в текстовый контекст.
 
         Берёт до max_messages последних пар вопрос-ответ (сначала user, потом bot).

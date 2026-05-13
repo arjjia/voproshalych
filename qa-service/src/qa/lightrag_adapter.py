@@ -225,7 +225,7 @@ def sentence_aware_chunking(
 
 _llm_call_count = 0
 _llm_last_call_time = 0.0
-LLM_CALL_DELAY = 0.5
+LLM_CALL_DELAY = 5.0
 
 
 def _get_lightrag_llm_model() -> str:

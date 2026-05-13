@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 
-SEARCH_TOP_K = 5
+SEARCH_TOP_K = 3
 
 
 def _get_timeouts() -> dict:
@@ -51,13 +51,15 @@ def _get_timeouts() -> dict:
     }
 
 
-def _format_search_context(data: dict) -> tuple[str, dict[str, str]]:
+def _format_search_context(data: dict, max_chunks: int = SEARCH_TOP_K) -> tuple[str, dict[str, str]]:
     """Преобразовать результат aquery_data в текстовый контекст для LLM.
 
+    Берёт ровно max_chunks первых чанков (ранжированных cfgA).
     Каждый чанк с URL помечается номером [источник N].
 
     Args:
         data: Результат LightRAG aquery_data.
+        max_chunks: Максимум чанков для передачи в LLM.
 
     Returns:
         Кортеж (контекст, маппинг {номер: URL}).
@@ -66,55 +68,34 @@ def _format_search_context(data: dict) -> tuple[str, dict[str, str]]:
         return "", {}
 
     result_data = data.get("data", {})
-    parts = []
     source_index: dict[str, str] = {}
     counter = 1
 
-    chunks = result_data.get("chunks", [])
-    if chunks:
-        chunk_texts = []
-        for chunk in chunks:
-            content = chunk.get("content", "")
-            file_path = chunk.get("file_path", "")
-            if content:
-                text = content.strip()
-                if file_path and file_path.startswith("http"):
-                    tag = f"[источник {counter}]"
-                    source_index[str(counter)] = file_path
-                    text += f"\n{tag}"
-                    counter += 1
-                elif file_path:
-                    text += f"\nИсточник: {file_path}"
-                chunk_texts.append(text)
-        if chunk_texts:
-            parts.append("--- Найденная информация ---\n" + "\n---\n".join(chunk_texts))
+    chunks = result_data.get("chunks", [])[:max_chunks]
+    if not chunks:
+        return "", {}
 
-    entities = result_data.get("entities", [])
-    if entities:
-        entity_lines = []
-        for entity in entities[:15]:
-            name = entity.get("entity_name", "")
-            desc = entity.get("description", "")
-            if name:
-                desc_short = desc[:100] if desc else ""
-                entity_lines.append(f"{name}: {desc_short}" if desc_short else name)
-        if entity_lines:
-            parts.append("--- Сущности ---\n" + "\n".join(entity_lines))
+    chunk_texts = []
+    for chunk in chunks:
+        content = chunk.get("content", "")
+        file_path = chunk.get("file_path", "")
+        if not content:
+            continue
+        text = content.strip()
+        if file_path and file_path.startswith("http"):
+            tag = f"[источник {counter}]"
+            source_index[str(counter)] = file_path
+            text += f"\n{tag}"
+            counter += 1
+        elif file_path:
+            text += f"\nИсточник: {file_path}"
+        chunk_texts.append(text)
 
-    relationships = result_data.get("relationships", [])
-    if relationships:
-        rel_lines = []
-        for rel in relationships[:10]:
-            src = rel.get("src_id", "")
-            tgt = rel.get("tgt_id", "")
-            desc = rel.get("description", "")
-            if src and tgt:
-                desc_short = desc[:100] if desc else ""
-                rel_lines.append(f"{src} → {tgt}: {desc_short}")
-        if rel_lines:
-            parts.append("--- Связи ---\n" + "\n".join(rel_lines))
+    if not chunk_texts:
+        return "", {}
 
-    return "\n\n".join(parts), source_index
+    context = "--- Найденная информация ---\n" + "\n---\n".join(chunk_texts)
+    return context, source_index
 
 def _extract_keywords_from_data(data: dict) -> dict:
     """Извлечь ключевые слова из метаданных результата поиска."""
@@ -272,14 +253,14 @@ async def _handle_kb_question(
 
     try:
         logger.info(
-            f"[{req_id}] Phase 2a START: aquery_data(mode=mix, top_k={SEARCH_TOP_K})\n"
+            f"[{req_id}] Phase 2a START: aquery_data(mode=local, top_k={SEARCH_TOP_K})\n"
             f"[{req_id}]   search_query: '{search_query[:120]}'"
         )
 
         search_data = await asyncio.wait_for(
             rag.aquery_data(
                 search_query,
-                param=QueryParam(mode="mix", top_k=SEARCH_TOP_K),
+                param=QueryParam(mode="local", top_k=SEARCH_TOP_K),
             ),
             timeout=timeouts["lightrag"],
         )
