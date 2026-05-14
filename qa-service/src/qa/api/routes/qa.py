@@ -69,6 +69,7 @@ def _format_search_context(data: dict, max_chunks: int = SEARCH_TOP_K) -> tuple[
 
     result_data = data.get("data", {})
     source_index: dict[str, str] = {}
+    url_to_idx: dict[str, int] = {}
     counter = 1
 
     chunks = result_data.get("chunks", [])[:max_chunks]
@@ -83,10 +84,14 @@ def _format_search_context(data: dict, max_chunks: int = SEARCH_TOP_K) -> tuple[
             continue
         text = content.strip()
         if file_path and file_path.startswith("http"):
-            tag = f"[источник {counter}]"
-            source_index[str(counter)] = file_path
-            text += f"\n{tag}"
-            counter += 1
+            if file_path in url_to_idx:
+                idx = url_to_idx[file_path]
+            else:
+                idx = counter
+                source_index[str(counter)] = file_path
+                url_to_idx[file_path] = counter
+                counter += 1
+            text += f"\n[источник {idx}]"
         elif file_path:
             text += f"\nИсточник: {file_path}"
         chunk_texts.append(text)

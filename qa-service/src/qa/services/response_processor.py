@@ -52,6 +52,10 @@ def parse_llm_json_response(raw_answer: str) -> ParsedLLMResponse:
             if parsed_fallback is not None:
                 return parsed_fallback
 
+            repaired = _try_repair_truncated_json(raw_answer)
+            if repaired is not None:
+                return repaired
+
             logger.warning(
                 f"[PARSE_JSON] No JSON found, treating as plain text: "
                 f"'{raw_answer[:200]}'"
@@ -131,6 +135,47 @@ def _parse_structured_text_fallback(raw_answer: str) -> ParsedLLMResponse | None
     )
 
 
+def _try_repair_truncated_json(raw_answer: str) -> ParsedLLMResponse | None:
+    """Попытаться извлечь данные из обрезанного JSON-ответа LLM.
+
+    LLM может не успеть дописать JSON до конца из-за лимита токенов.
+    Формат: {"relevant_sources": [1, 2], "answer": "текст...}
+
+    Args:
+        raw_answer: Сырой ответ от LLM.
+
+    Returns:
+        ParsedLLMResponse или None, если не похоже на JSON.
+    """
+    text = raw_answer.strip()
+    if not text.startswith("{") or "relevant_sources" not in text:
+        return None
+
+    sources_match = re.search(
+        r'"relevant_sources"\s*:\s*\[([^\]]*)\]', text
+    )
+    if not sources_match:
+        return None
+
+    relevant = [
+        int(x) for x in re.findall(r"\d+", sources_match.group(1))
+    ]
+
+    answer_match = re.search(r'"answer"\s*:\s*"', text)
+    if not answer_match:
+        return ParsedLLMResponse(relevant_sources=relevant, answer="")
+
+    answer_text = text[answer_match.end():]
+    answer_text = re.sub(r'"\s*\}?\s*$', "", answer_text)
+
+    cleaned = clean_markdown(answer_text)
+    logger.info(
+        f"[PARSE_JSON] Repaired truncated JSON: "
+        f"relevant={relevant}, answer_len={len(cleaned)}"
+    )
+    return ParsedLLMResponse(relevant_sources=relevant, answer=cleaned)
+
+
 def build_source_links(
     relevant_source_indices: list[int],
     source_index: dict[str, str],
@@ -145,9 +190,11 @@ def build_source_links(
         Список SourceLink с URL и label.
     """
     links: list[SourceLink] = []
+    seen_urls: set[str] = set()
     for idx in relevant_source_indices:
         url = source_index.get(str(idx))
-        if url and url.startswith("http"):
+        if url and url.startswith("http") and url not in seen_urls:
+            seen_urls.add(url)
             links.append(
                 SourceLink(
                     url=url,
