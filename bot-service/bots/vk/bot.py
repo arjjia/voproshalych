@@ -194,30 +194,18 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
             logging.error("VK callback event is missing required identifiers")
             return
 
-        snackbar_shown = False
+        # Сразу снимаем спиннер с кнопки, до HTTP-запроса к core
+        await _dismiss_button_loading(bot, event_id, user_id, peer_id)
+
+        bot_response: dict[str, Any] | None = None
 
         try:
             bot_response = await core_client.process_callback(event)
-        except httpx.HTTPStatusError:
+        except (httpx.HTTPStatusError, httpx.HTTPError):
             logging.exception("HTTP error from core VK callback")
-            await _show_snackbar(bot, event_id, user_id, peer_id, _MSG_SERVICE_UNAVAILABLE)
-            return
-        except httpx.HTTPError:
-            logging.exception("Не удалось обработать callback VK через core")
-            await _show_snackbar(bot, event_id, user_id, peer_id, _MSG_SERVICE_UNAVAILABLE)
-            return
 
-        snackbar_text = next(
-            (
-                action.get("text")
-                for action in bot_response.get("actions", [])
-                if action.get("text")
-            ),
-            "",
-        )
-
-        await _show_snackbar(bot, event_id, user_id, peer_id, snackbar_text[:90])
-        snackbar_shown = True
+        if not bot_response:
+            return
 
         for action in bot_response.get("actions", []):
             keyboard = build_inline_keyboard(action.get("buttons", []))
@@ -236,30 +224,22 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
     return bot
 
 
-async def _show_snackbar(
-    bot: Bot, event_id: str, user_id: int, peer_id: int, text: str,
+async def _dismiss_button_loading(
+    bot: Bot, event_id: str, user_id: int, peer_id: int,
 ) -> None:
-    """Показать всплывающее уведомление (snackbar) в VK.
+    """Снять спиннер с inline-кнопки VK без показа snackbar.
 
-    Args:
-        bot: Экземпляр VK-бота.
-        event_id: Идентификатор события.
-        user_id: Идентификатор пользователя.
-        peer_id: Идентификатор диалога.
-        text: Текст уведомления (макс. 90 символов).
+    Вызывается сразу при получении callback, до обработки в core.
     """
     try:
         await bot.api.messages.send_message_event_answer(
             event_id=event_id,
             user_id=user_id,
             peer_id=peer_id,
-            event_data=json.dumps({
-                "type": "show_snackbar",
-                "text": text[:90],
-            }),
+            event_data=json.dumps({}),
         )
     except Exception:
-        logging.exception("Не удалось показать snackbar в VK")
+        logging.exception("Не удалось снять спиннер с кнопки VK")
 
 
 def _strip_html_to_plain(text: str) -> str:
