@@ -506,7 +506,6 @@ class BotService:
             actions=[
                 OutgoingAction(
                     type=ActionType.send_text,
-                    parse_mode="HTML",
                     text=GREETING,
                     buttons=self._build_start_buttons(is_subscribed),
                     reply_keyboard=self._build_main_keyboard(),
@@ -557,6 +556,10 @@ class BotService:
                     callback_data="subscription:toggle",
                 )
             ],
+            [InlineButton(text="🌐 Сайт ТюмГУ", url="https://utmn.ru")],
+            [InlineButton(text="📄 Сведения об организации", url="https://sveden.utmn.ru")],
+            [InlineButton(text="📖 Инструкции для ИС", url="https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500")],
+            [InlineButton(text="📚 Руководства для обучающихся", url="https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972")],
         ]
 
     def _build_main_keyboard(self) -> list[list[KeyboardButton]]:
