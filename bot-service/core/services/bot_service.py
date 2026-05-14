@@ -551,11 +551,9 @@ class BotService:
         )
 
         return [
-            [
-                InlineButton(text="📋 Помощь", callback_data="menu:help"),
-                InlineButton(text="🔄 Новый диалог", callback_data="dialog:start_new"),
-                InlineButton(text="🔔 Рассылка", callback_data="subscription:toggle"),
-            ],
+            [InlineButton(text="📋 Помощь", callback_data="menu:help")],
+            [InlineButton(text="🔄 Новый диалог", callback_data="dialog:start_new")],
+            [InlineButton(text="🔔 Рассылка", callback_data="subscription:toggle")],
         ]
 
     def _build_main_keyboard(self) -> list[list[KeyboardButton]]:
