@@ -8,6 +8,9 @@
 .env.prod
 .env.lightrag
 
+# Docker Compose
+docker-compose.prod.yml
+
 # Python
 __pycache__/
 *.py[cod]
