@@ -227,16 +227,19 @@ def build_bot(settings: Settings, core_client: CoreClient) -> Bot:
 async def _dismiss_button_loading(
     bot: Bot, event_id: str, user_id: int, peer_id: int,
 ) -> None:
-    """Снять спиннер с inline-кнопки VK без показа snackbar.
+    """Снять спиннер с inline-кнопки VK.
 
-    Вызывается сразу при получении callback, до обработки в core.
+    VK требует ответ sendMessageEventAnswer на callback-событие.
+    Показываем минимальный snackbar «·», чтобы спиннер исчез.
     """
     try:
         await bot.api.messages.send_message_event_answer(
             event_id=event_id,
             user_id=user_id,
             peer_id=peer_id,
-            event_data=json.dumps({}),
+            event_data=json.dumps(
+                {"type": "show_snackbar", "text": "·"}
+            ),
         )
     except Exception:
         logging.exception("Не удалось снять спиннер с кнопки VK")
