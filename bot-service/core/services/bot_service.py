@@ -514,8 +514,13 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=GREETING,
+                    buttons=self._build_start_buttons(is_subscribed),
+                ),
+                OutgoingAction(
+                    type=ActionType.send_text,
+                    text="⬇️ Выбери действие:",
                     reply_keyboard=self._build_main_keyboard(),
-                )
+                ),
             ]
         )
 
