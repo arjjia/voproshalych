@@ -489,6 +489,13 @@ class BotService:
             ]
         )
 
+    SOURCE_URL_BUTTONS: list[list[InlineButton]] = [
+        [InlineButton(text="🌐 Официальный сайт ТюмГУ", url="https://utmn.ru")],
+        [InlineButton(text="📄 Сведения об организации", url="https://sveden.utmn.ru")],
+        [InlineButton(text="📖 Инструкции для ИС", url="https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500")],
+        [InlineButton(text="📚 Руководства для обучающихся", url="https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972")],
+    ]
+
     def _build_start_response(self, message: IncomingMessage, user) -> BotResponse:
         """Возвращает стартовое сообщение и базовые inline-кнопки.
 
@@ -507,13 +514,8 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=GREETING,
-                    buttons=self._build_start_buttons(is_subscribed),
-                ),
-                OutgoingAction(
-                    type=ActionType.send_text,
-                    text="⬇️",
                     reply_keyboard=self._build_main_keyboard(),
-                ),
+                )
             ]
         )
 
@@ -529,6 +531,7 @@ class BotService:
                 OutgoingAction(
                     type=ActionType.send_text,
                     text=HELP_CONTACTS,
+                    buttons=self.SOURCE_URL_BUTTONS,
                 )
             ]
         )
