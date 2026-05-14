@@ -272,7 +272,7 @@ def _strip_html_to_plain(text: str) -> str:
     return text
 
 
-VK_INLINE_EXCLUDED = {"dialog:start_new"}
+VK_INLINE_EXCLUDED: set[str] = set()
 
 
 def build_inline_keyboard(button_rows: list[list[dict[str, str]]]) -> str | None:

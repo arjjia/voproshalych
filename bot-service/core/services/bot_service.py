@@ -516,11 +516,6 @@ class BotService:
                     text=GREETING,
                     buttons=self._build_start_buttons(is_subscribed),
                 ),
-                OutgoingAction(
-                    type=ActionType.send_text,
-                    text="⬇️ Выбери действие:",
-                    reply_keyboard=self._build_main_keyboard(),
-                ),
             ]
         )
 
@@ -557,21 +552,10 @@ class BotService:
 
         return [
             [
-                InlineButton(
-                    text="Начать новый диалог",
-                    callback_data="dialog:start_new",
-                )
+                InlineButton(text="📋 Помощь", callback_data="menu:help"),
+                InlineButton(text="🔄 Новый диалог", callback_data="dialog:start_new"),
+                InlineButton(text="🔔 Рассылка", callback_data="subscription:toggle"),
             ],
-            [
-                InlineButton(
-                    text=subscription_text,
-                    callback_data="subscription:toggle",
-                )
-            ],
-            [InlineButton(text="🌐 Официальный сайт ТюмГУ", url="https://utmn.ru")],
-            [InlineButton(text="📄 Сведения об организации", url="https://sveden.utmn.ru")],
-            [InlineButton(text="📖 Инструкции для ИС", url="https://confluence.utmn.ru/pages/viewpage.action?pageId=3607500")],
-            [InlineButton(text="📚 Руководства для обучающихся", url="https://confluence.utmn.ru/pages/viewpage.action?pageId=86478972")],
         ]
 
     def _build_main_keyboard(self) -> list[list[KeyboardButton]]:
