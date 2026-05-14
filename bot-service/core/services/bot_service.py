@@ -581,7 +581,4 @@ class BotService:
                 InlineButton(text="❤️", callback_data="feedback:like"),
                 InlineButton(text="👎", callback_data="feedback:dislike"),
             ],
-            [
-                InlineButton(text="🔄 Новый диалог", callback_data="dialog:start_new"),
-            ],
         ]
