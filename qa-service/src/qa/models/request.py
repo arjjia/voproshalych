@@ -38,6 +38,7 @@ class QAResponse(BaseModel):
         context_expanded_query: Расширенный запрос с учётом контекста (опционально)
         keywords: Ключевые слова (опционально)
         question_type: Тип вопроса (1=БЗ, 2=система, 3=общий)
+        relevance_type: Релевантность ответа для БЗ: a=отвечено, b=нет информации
         relevant_sources: Номера релевантных источников
     """
 
@@ -48,6 +49,7 @@ class QAResponse(BaseModel):
     context_expanded_query: str | None = Field(default=None, max_length=1500)
     keywords: dict | None = Field(default=None)
     question_type: int = Field(default=1)
+    relevance_type: str | None = Field(default=None, max_length=1)
     relevant_sources: list[int] = Field(default_factory=list)
 
 

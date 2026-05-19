@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { BarChart3, LogOut, MessageSquare, Users } from "lucide-react";
+import { BarChart3, ClipboardList, LogOut, MessageSquare, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearCredentials } from "@/lib/auth";
 
 const NAV = [
   { to: "/", label: "Дашборд", icon: BarChart3 },
   { to: "/qa", label: "Вопросы и ответы", icon: MessageSquare },
+  { to: "/tasks", label: "Задачи", icon: ClipboardList },
   { to: "/users", label: "Пользователи", icon: Users },
 ];
 

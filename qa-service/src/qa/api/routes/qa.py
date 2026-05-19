@@ -356,6 +356,7 @@ async def _handle_kb_question(
         model=response.model,
         sources=source_links,
         keywords=keywords,
+        relevance_type="a" if parsed.relevant_sources else "b",
         relevant_sources=parsed.relevant_sources,
     )
 
@@ -396,6 +397,7 @@ async def _generate_no_kb_answer(
         model=response.model,
         sources=[],
         keywords=keywords,
+        relevance_type="b",
     )
 
 

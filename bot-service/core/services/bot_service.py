@@ -331,7 +331,9 @@ class BotService:
                 model_used=qa_result.get("model"),
                 question_type=qa_result.get("question_type"),
                 normalized_context=qa_result.get("context_expanded_query"),
+                relevance_type=qa_result.get("relevance_type"),
                 relevant_sources=qa_result.get("relevant_sources"),
+                source_links=qa_result.get("sources"),
             )
         return self._format_qa_answer(qa_result)
 
