@@ -9,14 +9,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 
-ENV UV_SYSTEM_PYTHON=1
-ENV UV_LINK_MODE=copy
+RUN uv sync --frozen
 
-RUN uv pip install --system langchain-core langchain-text-splitters pydantic-settings gigachat
-
-RUN uv sync
+RUN uv pip install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch --force-reinstall
 
 COPY save_models.py ./
 RUN --mount=type=secret,id=hf_token \
@@ -34,8 +33,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY benchmarks/ ./benchmarks/
 
-ENV PYTHONPATH=/app/src:/usr/local/lib/python3.12/site-packages
-ENV HF_TOKEN=${HF_TOKEN:-}
+ENV PYTHONPATH=/app/src
 
 EXPOSE 8004
 
