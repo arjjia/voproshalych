@@ -100,9 +100,7 @@ class HuggingFaceTokenizer:
 def get_lightrag_tokenizer() -> HuggingFaceTokenizer:
     global _tokenizer
     if _tokenizer is None:
-        _tokenizer = HuggingFaceTokenizer(
-            "deepvk/USER-bge-m3"
-        )
+        _tokenizer = HuggingFaceTokenizer("deepvk/USER-bge-m3")
     return _tokenizer
 
 
@@ -111,8 +109,8 @@ def sentence_aware_chunking(
     content: str,
     split_by_character: str | None = None,
     split_by_character_only: bool = False,
-    chunk_overlap_token_size: int = 50,
-    chunk_token_size: int = 500,
+    chunk_overlap_token_size: int = 30,
+    chunk_token_size: int = 300,
 ) -> list[dict[str, Any]]:
     """Чанкинг с сохранением целостности предложений.
 
@@ -420,8 +418,8 @@ def create_lightrag_config() -> dict:
             "deepvk-user-bge-m3",
         ),
         "use_pg_graph": os.getenv("LIGHT_RAG_USE_PG_GRAPH", "true").lower() == "true",
-        "chunk_token_size": int(os.getenv("CHUNK_TOKEN_SIZE", "500")),
-        "chunk_overlap_token_size": int(os.getenv("CHUNK_OVERLAP_TOKEN_SIZE", "50")),
+        "chunk_token_size": int(os.getenv("CHUNK_TOKEN_SIZE", "300")),
+        "chunk_overlap_token_size": int(os.getenv("CHUNK_OVERLAP_TOKEN_SIZE", "30")),
         "tokenizer": get_lightrag_tokenizer(),
     }
 
@@ -563,9 +561,7 @@ def _patch_merge_chunks():
             )
 
         def _freq_bonus(chunk_id: str) -> float:
-            freq = int(
-                chunk_tracking.get(chunk_id, {}).get("frequency", 1) or 1
-            )
+            freq = int(chunk_tracking.get(chunk_id, {}).get("frequency", 1) or 1)
             return min(
                 _CFG_A_FREQ_CAP,
                 1.0 + _CFG_A_FREQ_GAMMA * math.log1p(max(freq - 1, 0)),
@@ -606,11 +602,7 @@ def _patch_merge_chunks():
                     "_from_vector": False,
                 }
             else:
-                boost = (
-                    _CFG_A_VECTOR_CONFIRM_BOOST
-                    if prev.get("_from_vector")
-                    else 1.0
-                )
+                boost = _CFG_A_VECTOR_CONFIRM_BOOST if prev.get("_from_vector") else 1.0
                 prev["_score"] += score * boost
 
         for pos, chunk in enumerate(relation_chunks):
@@ -628,19 +620,11 @@ def _patch_merge_chunks():
                     "_from_vector": False,
                 }
             else:
-                boost = (
-                    _CFG_A_VECTOR_CONFIRM_BOOST
-                    if prev.get("_from_vector")
-                    else 1.0
-                )
+                boost = _CFG_A_VECTOR_CONFIRM_BOOST if prev.get("_from_vector") else 1.0
                 prev["_score"] += score * boost
 
         merged = sorted(scored.values(), key=lambda x: -x["_score"])
-        origin_len = (
-            len(vector_chunks)
-            + len(entity_chunks)
-            + len(relation_chunks)
-        )
+        origin_len = len(vector_chunks) + len(entity_chunks) + len(relation_chunks)
         for item in merged:
             item.pop("_score", None)
             item.pop("_from_vector", None)
