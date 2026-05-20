@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir --upgrade pip \
         "psycopg2-binary>=2.9.0" \
         "python-dotenv>=1.0.0"
 
-COPY alembic.ini migration/ ./
+COPY alembic.ini /app/alembic.ini
+COPY migration /app/migration
 
 ENV PYTHONPATH=/app/src
 
