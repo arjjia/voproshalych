@@ -54,12 +54,14 @@ echo "=== Fixing mismatches ==="
                 RAISE WARNING 'Graph "%" has no matching namespace — skipping', g.name;
             ELSIF new_oid != g.graphid THEN
                 RAISE NOTICE 'Fixing graph "%": graphid % -> %', g.name, g.graphid, new_oid;
-                UPDATE ag_catalog.ag_graph
-                SET graphid = new_oid
-                WHERE name = g.name;
+                SET session_replication_role = 'replica';
                 UPDATE ag_catalog.ag_label
                 SET graph = new_oid
                 WHERE graph = g.graphid;
+                UPDATE ag_catalog.ag_graph
+                SET graphid = new_oid
+                WHERE name = g.name;
+                SET session_replication_role = 'origin';
                 fixed := fixed + 1;
             END IF;
         END LOOP;
