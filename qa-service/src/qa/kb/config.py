@@ -48,7 +48,31 @@ class KBConfig(BaseSettings):
     )
 
 
-_config: KBConfig | None = None
+class RerankerConfig(BaseSettings):
+    """Конфигурация реранкера (cross-encoder).
+
+    Attributes:
+        reranker_enabled: Включить second-stage reranking
+        reranker_model: Название модели реранкера
+        retrieval_candidates: Количество чанков из LightRAG до реранкинга
+        reranker_top_k: Количество чанков после реранкинга
+        reranker_max_length: Максимальная длина токенов для пары query+passage
+    """
+
+    reranker_enabled: bool = False
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    retrieval_candidates: int = 30
+    reranker_top_k: int = 10
+    reranker_max_length: int = 512
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=False,
+    )
+
+
+_kb_config: KBConfig | None = None
+_reranker_config: RerankerConfig | None = None
 
 
 def get_kb_config() -> KBConfig:
@@ -57,7 +81,19 @@ def get_kb_config() -> KBConfig:
     Returns:
         Объект KBConfig с настройками
     """
-    global _config
-    if _config is None:
-        _config = KBConfig()
-    return _config
+    global _kb_config
+    if _kb_config is None:
+        _kb_config = KBConfig()
+    return _kb_config
+
+
+def get_reranker_config() -> RerankerConfig:
+    """Получить конфигурацию реранкера.
+
+    Returns:
+        Объект RerankerConfig с настройками
+    """
+    global _reranker_config
+    if _reranker_config is None:
+        _reranker_config = RerankerConfig()
+    return _reranker_config

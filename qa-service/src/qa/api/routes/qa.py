@@ -18,6 +18,8 @@ from ...config.prompts import (
 from ...models.request import QARequest, QAResponse, SourceLink
 from ...llm import get_llm_pool
 from ...llm.config import get_llm_config
+from ...kb.config import get_reranker_config
+from ...kb.reranker import is_reranker_enabled, rerank_chunks
 from ...services.question_router import (
     QUESTION_TYPE_GENERAL,
     QUESTION_TYPE_KB,
@@ -38,7 +40,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 
-SEARCH_TOP_K = 3
+SEARCH_MODE = "mix"
+SEARCH_TOP_K_NO_RERANKER = 3
 
 
 def _get_timeouts() -> dict:
@@ -51,7 +54,9 @@ def _get_timeouts() -> dict:
     }
 
 
-def _format_search_context(data: dict, max_chunks: int = SEARCH_TOP_K) -> tuple[str, dict[str, str]]:
+def _format_search_context(
+    data: dict, max_chunks: int = SEARCH_TOP_K_NO_RERANKER
+) -> tuple[str, dict[str, str]]:
     """Преобразовать результат aquery_data в текстовый контекст для LLM.
 
     Берёт ровно max_chunks первых чанков (ранжированных cfgA).
@@ -249,6 +254,14 @@ async def _handle_kb_question(
     from lightrag import QueryParam
     from ...main import get_lightrag
 
+    reranker_cfg = get_reranker_config()
+    use_reranker = is_reranker_enabled()
+    retrieval_k = (
+        reranker_cfg.retrieval_candidates if use_reranker
+        else SEARCH_TOP_K_NO_RERANKER
+    )
+    final_k = reranker_cfg.reranker_top_k if use_reranker else SEARCH_TOP_K_NO_RERANKER
+
     t2_start = time.time()
     rag = get_lightrag()
 
@@ -258,20 +271,31 @@ async def _handle_kb_question(
 
     try:
         logger.info(
-            f"[{req_id}] Phase 2a START: aquery_data(mode=local, top_k={SEARCH_TOP_K})\n"
+            f"[{req_id}] Phase 2a START: "
+            f"aquery_data(mode={SEARCH_MODE}, top_k={retrieval_k})\n"
             f"[{req_id}]   search_query: '{search_query[:120]}'"
         )
 
         search_data = await asyncio.wait_for(
             rag.aquery_data(
                 search_query,
-                param=QueryParam(mode="local", top_k=SEARCH_TOP_K),
+                param=QueryParam(mode=SEARCH_MODE, top_k=retrieval_k),
             ),
             timeout=timeouts["lightrag"],
         )
         t2_elapsed = time.time() - t2_start
 
-        search_context, source_index = _format_search_context(search_data)
+        if use_reranker:
+            chunks = search_data.get("data", {}).get("chunks", [])
+            logger.info(
+                f"[{req_id}] Reranker: {len(chunks)} candidates -> top {final_k}"
+            )
+            reranked = rerank_chunks(search_query, chunks, top_k=final_k)
+            search_data["data"]["chunks"] = reranked
+
+        search_context, source_index = _format_search_context(
+            search_data, max_chunks=final_k
+        )
         keywords = _extract_keywords_from_data(search_data)
 
         logger.info(

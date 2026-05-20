@@ -83,6 +83,7 @@ async def run_benchmark(
     cosine_threshold: float | None = None,
     use_query_expansion: bool = False,
     use_reranker: bool = False,
+    reranker_candidates: int = 30,
     delay_between_queries: float = 1.0,
 ) -> Dict:
     """Запустить URL-level бенчмарк v2.
@@ -94,6 +95,7 @@ async def run_benchmark(
         cosine_threshold: Порог косинусного сходства (None=default)
         use_query_expansion: Использовать расширение запросов
         use_reranker: Использовать cross-encoder reranker
+        reranker_candidates: Количество кандидатов до реранкинга
         delay_between_queries: Задержка между запросами (секунды)
 
     Returns:
@@ -187,12 +189,13 @@ async def run_benchmark(
             elapsed = time.time() - t0
 
             if use_reranker:
-                os.environ["RERANKER_ENABLED"] = "true"
                 from qa.kb.reranker import rerank_chunks as _rerank
 
                 chunks = search_data.get("data", {}).get("chunks", [])
                 if chunks:
-                    reranked = _rerank(search_query, chunks, top_k=top_k)
+                    reranked = _rerank(
+                        search_query, chunks, top_k=top_k
+                    )
                     search_data["data"]["chunks"] = reranked
 
             retrieved_urls = extract_urls_from_search_data(
@@ -275,6 +278,7 @@ async def run_benchmark(
             ),
             "query_expansion": use_query_expansion,
             "reranker": use_reranker,
+            "reranker_candidates": reranker_candidates if use_reranker else None,
             "evaluation_level": "url",
             "embedding_model": os.getenv(
                 "LIGHT_RAG_MODEL_NAME",
@@ -421,6 +425,12 @@ def main():
         help="Использовать cross-encoder reranker",
     )
     parser.add_argument(
+        "--reranker-candidates",
+        type=int,
+        default=30,
+        help="Количество кандидатов до реранкинга (default: 30)",
+    )
+    parser.add_argument(
         "--delay",
         type=float,
         default=1.0,
@@ -470,6 +480,7 @@ def main():
             cosine_threshold=args.cosine_threshold,
             use_query_expansion=args.query_expansion,
             use_reranker=args.reranker,
+            reranker_candidates=args.reranker_candidates,
             delay_between_queries=args.delay,
         )
     )

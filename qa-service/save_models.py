@@ -5,7 +5,7 @@ import os
 from sentence_transformers import SentenceTransformer
 
 EMBEDDING_MODEL = "deepvk/USER-bge-m3"
-RERANKER_MODEL = "DiTy/cross-encoder-russian-msmarco"
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
 def main() -> None:
@@ -16,7 +16,7 @@ def main() -> None:
     emb = SentenceTransformer(EMBEDDING_MODEL)
     print(f"Embedding dim: {emb.get_sentence_embedding_dimension()}")
 
-    if os.getenv("RERANKER_ENABLED", "false").lower() == "true":
+    if os.getenv("RERANKER_ENABLED", "true").lower() == "true":
         from sentence_transformers import CrossEncoder
 
         print(f"Downloading reranker model: {RERANKER_MODEL}")
