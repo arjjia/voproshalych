@@ -129,12 +129,15 @@ async def run_benchmark(
 
     logger.info(
         "Запуск URL-level бенчмарка: %d запросов, top_k=%d, "
-        "mode=%s, cosine_threshold=%s, query_expansion=%s",
+        "mode=%s, cosine_threshold=%s, query_expansion=%s, "
+        "reranker=%s, reranker_candidates=%d",
         total,
         top_k,
         search_mode,
         cosine_threshold,
         use_query_expansion,
+        use_reranker,
+        reranker_candidates if use_reranker else 0,
     )
 
     for idx, item in enumerate(dataset):
@@ -177,15 +180,20 @@ async def run_benchmark(
                 )
 
         try:
+            retrieval_k = (
+                reranker_candidates if use_reranker else top_k
+            )
             param = QueryParam(
                 mode=search_mode,
-                top_k=top_k,
+                top_k=retrieval_k,
                 only_need_context=True,
                 enable_rerank=False,
             )
 
             t0 = time.time()
-            search_data = await rag.aquery_data(search_query, param=param)
+            search_data = await rag.aquery_data(
+                search_query, param=param
+            )
             elapsed = time.time() - t0
 
             if use_reranker:
