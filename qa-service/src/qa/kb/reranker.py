@@ -3,22 +3,30 @@
 Cross-encoder модель принимает пары (query, passage) и возвращает
 скор релевантности. Используется как second-stage ranking поверх
 результатов LightRAG + cfgA score merge.
+
+ВНИМАНИЕ: реранкер отключён. Для включения установите
+RERANKER_ENABLED=true в .env и раскомментируйте импорт sentence_transformers.
 """
 
 import logging
 import time
 from typing import Optional
 
-from sentence_transformers import CrossEncoder
-
 from qa.kb.config import get_reranker_config
 
 logger = logging.getLogger(__name__)
 
-_reranker: Optional[CrossEncoder] = None
+_reranker = None
 
 
-def get_reranker() -> CrossEncoder:
+def _get_cross_encoder_class():
+    """Ленивый импорт CrossEncoder (не загружает модель при отключённом реранкере)."""
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder
+
+
+def get_reranker():
     """Получить или создать singleton реранкер.
 
     Returns:
@@ -32,6 +40,7 @@ def get_reranker() -> CrossEncoder:
             config.reranker_model,
             config.reranker_max_length,
         )
+        CrossEncoder = _get_cross_encoder_class()
         _reranker = CrossEncoder(
             config.reranker_model,
             max_length=config.reranker_max_length,
@@ -98,7 +107,5 @@ def rerank_chunks(
         return [chunk for _, chunk in scored_chunks[:top_k]]
 
     except Exception as exc:
-        logger.warning(
-            "Reranker failed, returning original order: %s", exc
-        )
+        logger.warning("Reranker failed, returning original order: %s", exc)
         return chunks[:top_k]

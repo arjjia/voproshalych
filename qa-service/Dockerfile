@@ -27,7 +27,7 @@ RUN --mount=type=secret,id=hf_token \
     sh -c 'export HF_TOKEN="$(cat /run/secrets/hf_token)" && \
            export HF_HOME=/hf-cache && \
            export TRANSFORMERS_CACHE=/hf-cache && \
-           export RERANKER_ENABLED=true && \
+            export RERANKER_ENABLED=false && \
            export PYTHONUNBUFFERED=1 && \
            uv run python -u save_models.py && \
            mkdir -p /root/.cache && \
