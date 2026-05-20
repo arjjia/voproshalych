@@ -2,9 +2,9 @@ FROM golang:1.24 AS builder
 
 WORKDIR /src
 
-COPY bot-service/bots/max/go.mod /src/go.mod
-COPY bot-service/bots/max/go.sum /src/go.sum
-COPY bot-service/bots/max/main.go /src/main.go
+COPY bots/max/go.mod /src/go.mod
+COPY bots/max/go.sum /src/go.sum
+COPY bots/max/main.go /src/main.go
 
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/max-bot .

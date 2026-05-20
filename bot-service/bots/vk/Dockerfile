@@ -5,10 +5,10 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY bot-service/pyproject.toml /tmp/pyproject.toml
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-RUN pip install --no-cache-dir --no-build-isolation "/tmp[vk]"
+COPY pyproject.toml /tmp/pyproject.toml
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir --no-build-isolation "/tmp[vk]"
 
-COPY bot-service/bots/vk /app
+COPY bots/vk /app
 
 CMD ["python", "bot.py"]

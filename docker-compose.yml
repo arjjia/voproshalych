@@ -77,8 +77,8 @@ services:
 
   bot-core:
     build:
-      context: .
-      dockerfile: bot-service/core/Dockerfile
+      context: ./bot-service
+      dockerfile: core/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -117,8 +117,8 @@ services:
 
   telegram-bot:
     build:
-      context: .
-      dockerfile: bot-service/bots/telegram/Dockerfile
+      context: ./bot-service
+      dockerfile: bots/telegram/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -135,8 +135,8 @@ services:
 
   vk-bot:
     build:
-      context: .
-      dockerfile: bot-service/bots/vk/Dockerfile
+      context: ./bot-service
+      dockerfile: bots/vk/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
@@ -153,8 +153,8 @@ services:
 
   max-bot:
     build:
-      context: .
-      dockerfile: bot-service/bots/max/Dockerfile
+      context: ./bot-service
+      dockerfile: bots/max/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
