@@ -11,11 +11,15 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen
-
-RUN uv pip install \
-    --extra-index-url https://download.pytorch.org/whl/cpu \
-    torch --force-reinstall
+RUN uv sync --frozen \
+    && uv pip install \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        torch --force-reinstall \
+    ; uv pip list 2>/dev/null \
+        | awk '/^nvidia-/ {print $1}' \
+        | xargs -r uv pip uninstall --yes 2>/dev/null \
+    ; rm -rf /root/.cache/uv /root/.cache/pip 2>/dev/null \
+    ; true
 
 COPY save_models.py ./
 RUN --mount=type=secret,id=hf_token \
@@ -28,7 +32,8 @@ RUN --mount=type=secret,id=hf_token \
            uv run python -u save_models.py && \
            mkdir -p /root/.cache && \
            rm -rf /root/.cache/huggingface && \
-           cp -a /hf-cache /root/.cache/huggingface'
+           cp -a /hf-cache /root/.cache/huggingface' \
+    && rm -rf /root/.cache/uv /root/.cache/pip 2>/dev/null; true
 
 COPY src/ ./src/
 COPY scripts/ ./scripts/
