@@ -39,6 +39,14 @@ def parse_llm_json_response(raw_answer: str) -> ParsedLLMResponse:
       "answer": "текст ответа"
     }
 
+    Последовательность попыток:
+    1. Strip markdown-обёрток (```json ... ```)
+    2. Прямой JSON parse
+    3. Структурированный текст (key: value)
+    4. Починка обрезанного JSON
+    5. Regex-извлечение answer из сырого JSON
+    6. Plain text fallback
+
     Args:
         raw_answer: Сырой ответ от LLM.
 
@@ -46,48 +54,68 @@ def parse_llm_json_response(raw_answer: str) -> ParsedLLMResponse:
         ParsedLLMResponse с распарсенными данными.
     """
     try:
-        json_match = re.search(r"\{[^{}]*\}", raw_answer, re.DOTALL)
-        if not json_match:
-            parsed_fallback = _parse_structured_text_fallback(raw_answer)
-            if parsed_fallback is not None:
-                return parsed_fallback
+        cleaned_input = _strip_json_wrappers(raw_answer)
 
-            repaired = _try_repair_truncated_json(raw_answer)
-            if repaired is not None:
-                return repaired
+        json_match = _extract_json_string(cleaned_input)
+        if json_match:
+            try:
+                parsed = json.loads(json_match)
+            except json.JSONDecodeError:
+                parsed = None
 
-            logger.warning(
-                f"[PARSE_JSON] No JSON found, treating as plain text: "
-                f"'{raw_answer[:200]}'"
-            )
-            cleaned = clean_markdown(raw_answer)
-            return ParsedLLMResponse(answer=cleaned)
+            if parsed and isinstance(parsed, dict):
+                relevant = parsed.get("relevant_sources", [])
+                if not isinstance(relevant, list):
+                    relevant = []
+                relevant = [
+                    int(x)
+                    for x in relevant
+                    if isinstance(x, (int, str))
+                    and str(x).isdigit()
+                ]
 
-        parsed = json.loads(json_match.group())
+                answer = parsed.get("answer", "")
+                if not isinstance(answer, str) or not answer.strip():
+                    answer = raw_answer
 
-        relevant = parsed.get("relevant_sources", [])
-        if not isinstance(relevant, list):
-            relevant = []
-        relevant = [int(x) for x in relevant if isinstance(x, (int, str)) and str(x).isdigit()]
+                answer = clean_markdown(answer)
 
-        answer = parsed.get("answer", "")
-        if not isinstance(answer, str) or not answer.strip():
-            answer = raw_answer
+                logger.info(
+                    f"[PARSE_JSON] relevant={relevant}, "
+                    f"answer_len={len(answer)}"
+                )
 
-        answer = clean_markdown(answer)
+                return ParsedLLMResponse(
+                    relevant_sources=relevant,
+                    answer=answer,
+                )
 
-        logger.info(
-            f"[PARSE_JSON] relevant={relevant}, "
-            f"answer_len={len(answer)}"
+        parsed_fallback = _parse_structured_text_fallback(cleaned_input)
+        if parsed_fallback is not None:
+            return _sanitize_answer(parsed_fallback)
+
+        repaired = _try_repair_truncated_json(cleaned_input)
+        if repaired is not None:
+            return _sanitize_answer(repaired)
+
+        regex_fallback = _extract_answer_by_regex(cleaned_input)
+        if regex_fallback is not None:
+            return _sanitize_answer(regex_fallback)
+
+        logger.warning(
+            f"[PARSE_JSON] No JSON found, treating as plain text: "
+            f"'{raw_answer[:200]}'"
         )
+        cleaned = clean_markdown(raw_answer)
+        return ParsedLLMResponse(answer=cleaned)
 
-        return ParsedLLMResponse(
-            relevant_sources=relevant,
-            answer=answer,
+    except Exception as e:
+        logger.warning(
+            f"[PARSE_JSON] Failed: {e}, raw='{raw_answer[:200]}'"
         )
-
-    except (json.JSONDecodeError, Exception) as e:
-        logger.warning(f"[PARSE_JSON] Failed: {e}, raw='{raw_answer[:200]}'")
+        result = _extract_answer_by_regex(raw_answer)
+        if result is not None:
+            return result
         cleaned = clean_markdown(raw_answer)
         return ParsedLLMResponse(answer=cleaned)
 
@@ -174,6 +202,164 @@ def _try_repair_truncated_json(raw_answer: str) -> ParsedLLMResponse | None:
         f"relevant={relevant}, answer_len={len(cleaned)}"
     )
     return ParsedLLMResponse(relevant_sources=relevant, answer=cleaned)
+
+
+def _strip_json_wrappers(text: str) -> str:
+    """Убрать markdown-обёртки вокруг JSON.
+
+    LLM может вернуть JSON внутри ```json ... ``` или ``` ... ```.
+    Также убирает лидирующие/трейлингные теги вроде 'json' или 'JSON'.
+
+    Args:
+        text: Сырой текст ответа LLM.
+
+    Returns:
+        Очищенный текст.
+    """
+    text = text.strip()
+
+    text = re.sub(
+        r"^```(?:json)?\s*\n?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\n?```\s*$",
+        "",
+        text,
+    )
+
+    return text.strip()
+
+
+def _extract_json_string(text: str) -> str | None:
+    """Извлечь JSON-строку из текста.
+
+    Ищет сбалансированные фигурные скобки, содержащие
+    "relevant_sources" или "answer".
+
+    Args:
+        text: Текст для поиска JSON.
+
+    Returns:
+        JSON-строка или None.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i in range(start, len(text)):
+        c = text[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if c == "\\":
+            escape_next = True
+            continue
+
+        if c == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                if "relevant_sources" in candidate or '"answer"' in candidate:
+                    return candidate
+                start = text.find("{", i + 1)
+                if start == -1:
+                    return None
+                depth = 0
+
+    return None
+
+
+def _extract_answer_by_regex(text: str) -> ParsedLLMResponse | None:
+    """Извлечь answer и relevant_sources regex'ом из сырого текста.
+
+    Последняя линия защиты: срабатывает когда JSON невалидный
+    или обёрнут в мусор, но поля "answer" и "relevant_sources"
+    читаемы.
+
+    Args:
+        text: Сырой текст.
+
+    Returns:
+        ParsedLLMResponse или None.
+    """
+    if '"answer"' not in text and '"relevant_sources"' not in text:
+        return None
+
+    relevant = []
+    sources_match = re.search(
+        r'"relevant_sources"\s*:\s*\[([^\]]*)\]', text
+    )
+    if sources_match:
+        relevant = [
+            int(x) for x in re.findall(r"\d+", sources_match.group(1))
+        ]
+
+    answer = ""
+    answer_match = re.search(
+        r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"', text
+    )
+    if answer_match:
+        answer = answer_match.group(1)
+        answer = answer.replace('\\"', '"')
+        answer = answer.replace("\\n", "\n")
+        answer = answer.replace("\\\\", "\\")
+        answer = answer.strip()
+
+    if not answer:
+        return None
+
+    answer = clean_markdown(answer)
+    logger.warning(
+        f"[PARSE_JSON] Regex fallback: "
+        f"relevant={relevant}, answer_len={len(answer)}"
+    )
+    return ParsedLLMResponse(relevant_sources=relevant, answer=answer)
+
+
+def _sanitize_answer(response: ParsedLLMResponse) -> ParsedLLMResponse:
+    """Проверить, не выглядит ли answer как сырой JSON.
+
+    Если answer начинается с '{' и содержит '"answer"' —
+    попытаться вытащить текст ответа ещё раз.
+
+    Args:
+        response: Результат парсинга для проверки.
+
+    Returns:
+        Тот же или исправленный ParsedLLMResponse.
+    """
+    answer = response.answer.strip()
+
+    if answer.startswith("{") and '"answer"' in answer:
+        logger.warning(
+            "[PARSE_JSON] Answer looks like raw JSON, "
+            "extracting answer field"
+        )
+        extracted = _extract_answer_by_regex(answer)
+        if extracted and extracted.answer.strip():
+            response.answer = extracted.answer
+            if extracted.relevant_sources:
+                response.relevant_sources = extracted.relevant_sources
+
+    return response
 
 
 def build_source_links(
