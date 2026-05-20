@@ -5,6 +5,8 @@ from .confluence_help import ConfluenceHelpParser
 from .confluence_study import ConfluenceStudyParser
 from .sveden import SvedenParser
 from .utmn import UtmnParser
+from .utmn_contacts import UtmnContactsParser
+from .utmn_faq import UtmnFaqParser
 from .web import WebPageParser
 
 __all__ = [
@@ -14,5 +16,7 @@ __all__ = [
     "ConfluenceStudyParser",
     "SvedenParser",
     "UtmnParser",
+    "UtmnContactsParser",
+    "UtmnFaqParser",
     "WebPageParser",
 ]

@@ -43,7 +43,14 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit, urlunsplit
 from sqlalchemy import create_engine, text
 
 from qa.kb.config import get_kb_config
-from qa.kb.parsers import ConfluenceHelpParser, ConfluenceStudyParser, SvedenParser, UtmnParser
+from qa.kb.parsers import (
+    ConfluenceHelpParser,
+    ConfluenceStudyParser,
+    SvedenParser,
+    UtmnContactsParser,
+    UtmnFaqParser,
+    UtmnParser,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,7 +75,9 @@ def normalize_url(url: str) -> str:
         return url.strip()
 
 
-def make_doc_key(source_type: str, file_url: str | None, page_url: str, title: str) -> str:
+def make_doc_key(
+    source_type: str, file_url: str | None, page_url: str, title: str
+) -> str:
     base = normalize_url(file_url or page_url)
     if not base:
         base = f"{source_type}:{unquote(title)}"
@@ -148,11 +157,13 @@ def clear_lightrag_storage():
     with engine.connect() as conn:
         conn = conn.execution_options(isolation_level="AUTOCOMMIT")
 
-        result = conn.execute(text(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_name LIKE 'lightrag_%' "
-            "ORDER BY table_name"
-        ))
+        result = conn.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name LIKE 'lightrag_%' "
+                "ORDER BY table_name"
+            )
+        )
         tables = [row[0] for row in result]
 
         for table in tables:
@@ -171,16 +182,16 @@ def clear_lightrag_storage():
 
             for graph_name in graphs:
                 try:
-                    conn.execute(text(
-                        f"SELECT drop_graph('{graph_name}', true)"
-                    ))
+                    conn.execute(text(f"SELECT drop_graph('{graph_name}', true)"))
                     logger.info(f"Dropped AGE graph: {graph_name}")
                 except Exception as e:
                     logger.warning(f"Could not drop AGE graph {graph_name}: {e}")
         except Exception as e:
             logger.warning(f"AGE not available: {e}")
 
-    logger.info(f"LightRAG storage cleared ({len(tables)} tables, {len(graphs)} AGE graphs)")
+    logger.info(
+        f"LightRAG storage cleared ({len(tables)} tables, {len(graphs)} AGE graphs)"
+    )
 
 
 async def init_lightrag():
@@ -194,7 +205,9 @@ async def init_lightrag():
         logger.info("LightRAG already initialized")
 
 
-async def insert_document_to_lightrag(rag, doc: Document, doc_idx: int, no_graph: bool = False) -> bool:
+async def insert_document_to_lightrag(
+    rag, doc: Document, doc_idx: int, no_graph: bool = False
+) -> bool:
     try:
         content = f"{doc.title}\n\n{doc.text_content}"
         doc_key = make_doc_key(doc.source_type, doc.file_url, doc.url, doc.title)
@@ -232,6 +245,8 @@ _ROUTE_CONFLUENCE_HELP_PDF = "confluence_help_pdf"
 _ROUTE_SVEDEN_HTML = "sveden_html"
 _ROUTE_SVEDEN_PDF = "sveden_pdf"
 _ROUTE_UTMN_PDF = "utmn_pdf"
+_ROUTE_UTMN_CONTACTS = "utmn_contacts"
+_ROUTE_UTMN_FAQ = "utmn_faq"
 _ROUTE_GENERIC_PDF = "generic_pdf"
 
 
@@ -245,6 +260,8 @@ def route_url(url: str) -> tuple[str, str]:
         - _ROUTE_SVEDEN_HTML           — HTML с таблицами
         - _ROUTE_SVEDEN_PDF            — PDF через OCR
         - _ROUTE_UTMN_PDF              — PDF через OCR
+        - _ROUTE_UTMN_CONTACTS         — Контакты ТюмГУ (блоки)
+        - _ROUTE_UTMN_FAQ              — FAQ абитуриентов
         - _ROUTE_GENERIC_PDF           — PDF через OCR (fallback)
     """
     parsed = urlparse(url)
@@ -265,13 +282,20 @@ def route_url(url: str) -> tuple[str, str]:
         if is_pdf:
             return "sveden", _ROUTE_SVEDEN_PDF
         from qa.kb.parsers.sveden import SVEDEN_HTML_PAGES
+
         sveden_html_urls = {p["url"].rstrip("/") for p in SVEDEN_HTML_PAGES}
         if url.rstrip("/") in sveden_html_urls:
             return "sveden", _ROUTE_SVEDEN_HTML
         return "sveden", _ROUTE_SVEDEN_HTML
 
-    if "utmn.ru" in host and is_pdf:
-        return "utmn", _ROUTE_UTMN_PDF
+    if "utmn.ru" in host:
+        if is_pdf:
+            return "utmn", _ROUTE_UTMN_PDF
+        normalized = url.split("?")[0].rstrip("/")
+        if normalized == "https://www.utmn.ru/kontakty":
+            return "utmn_contacts", _ROUTE_UTMN_CONTACTS
+        if normalized == "https://www.utmn.ru/abiturient/faq":
+            return "utmn_faq", _ROUTE_UTMN_FAQ
 
     if is_pdf:
         return "utmn", _ROUTE_GENERIC_PDF
@@ -284,6 +308,8 @@ def route_url(url: str) -> tuple[str, str]:
         f"  - Sveden HTML:     .../sveden/managers/ | /catering/ | /struct\n"
         f"  - Sveden PDF:      .../sveden/files/.../*.pdf\n"
         f"  - UTMN PDF:        .../utmn.ru/.../*.pdf\n"
+        f"  - UTMN Контакты:   https://www.utmn.ru/kontakty/\n"
+        f"  - UTMN FAQ:        https://www.utmn.ru/abiturient/faq/\n"
         f"  - Любой PDF:       *.pdf"
     )
 
@@ -302,6 +328,7 @@ async def process_single_url(url: str) -> Document | None:
             return None
 
         import httpx
+
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             api_url = f"{parser._host}/rest/api/content/{page_id}?expand=body.export_view,title"
             resp = await client.get(api_url, headers=parser._headers)
@@ -315,6 +342,7 @@ async def process_single_url(url: str) -> Document | None:
             return None
 
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(html_body, "html.parser")
         text = soup.get_text(separator=" ")
         text = re.sub(r"\s+", " ", text).strip()
@@ -327,7 +355,12 @@ async def process_single_url(url: str) -> Document | None:
             file_url=None,
         )
 
-    if doc_type in (_ROUTE_CONFLUENCE_HELP_PDF, _ROUTE_SVEDEN_PDF, _ROUTE_UTMN_PDF, _ROUTE_GENERIC_PDF):
+    if doc_type in (
+        _ROUTE_CONFLUENCE_HELP_PDF,
+        _ROUTE_SVEDEN_PDF,
+        _ROUTE_UTMN_PDF,
+        _ROUTE_GENERIC_PDF,
+    ):
         title = _extract_title_from_url(url)
         logger.info(f"OCR парсинг PDF: {title}")
 
@@ -347,6 +380,7 @@ async def process_single_url(url: str) -> Document | None:
     if doc_type == _ROUTE_SVEDEN_HTML:
         parser = SvedenParser()
         from qa.kb.parsers.sveden import SVEDEN_HTML_PAGES
+
         title = "Sveden page"
         for p in SVEDEN_HTML_PAGES:
             if p["url"].rstrip("/") == url.rstrip("/"):
@@ -365,11 +399,43 @@ async def process_single_url(url: str) -> Document | None:
             file_url=None,
         )
 
+    if doc_type == _ROUTE_UTMN_CONTACTS:
+        from qa.kb.parsers.utmn_contacts import CONTACTS_URL
+
+        parser = UtmnContactsParser()
+        parsed_docs = await parser.get_documents(CONTACTS_URL)
+        if not parsed_docs:
+            return None
+        return Document(
+            url=parsed_docs[0].url,
+            title="Контакты ТюмГУ (все блоки)",
+            text_content="\n\n".join(d.text_content for d in parsed_docs),
+            source_type=source_type,
+            file_url=None,
+        )
+
+    if doc_type == _ROUTE_UTMN_FAQ:
+        from qa.kb.parsers.utmn_faq import FAQ_BASE_URL
+
+        parser = UtmnFaqParser()
+        parsed_docs = await parser.get_documents(FAQ_BASE_URL)
+        if not parsed_docs:
+            return None
+        return Document(
+            url=FAQ_BASE_URL,
+            title="FAQ абитуриентов ТюмГУ",
+            text_content="\n\n".join(d.text_content for d in parsed_docs),
+            source_type=source_type,
+            file_url=None,
+        )
+
     logger.error(f"Неизвестный doc_type: {doc_type}")
     return None
 
 
-def doc_exists_in_db(url: str, source_type: str, file_url: str | None, title: str) -> bool:
+def doc_exists_in_db(
+    url: str, source_type: str, file_url: str | None, title: str
+) -> bool:
     """Проверить, есть ли документ уже в LIGHTRAG_DOC_STATUS."""
     engine = get_engine()
     doc_key = make_doc_key(source_type, file_url, url, title)
@@ -392,20 +458,30 @@ def _remove_doc_from_graph_properties(conn, doc_id: str, chunk_ids: list[str]) -
     """
     fp_pattern = f"%{doc_id}%"
 
-    rows = conn.execute(text("""
+    rows = conn.execute(
+        text("""
         SELECT id, start_id, end_id, properties::text as props
         FROM chunk_entity_relation."DIRECTED"
         WHERE properties::text LIKE :fp
-    """), {"fp": fp_pattern}).fetchall()
-    logger.info(f"force_delete_graph: found {len(rows)} edges to clean for doc {doc_id}")
+    """),
+        {"fp": fp_pattern},
+    ).fetchall()
+    logger.info(
+        f"force_delete_graph: found {len(rows)} edges to clean for doc {doc_id}"
+    )
     _clean_graph_elements(conn, rows, chunk_ids, doc_id, is_edge=True)
 
-    rows_v = conn.execute(text("""
+    rows_v = conn.execute(
+        text("""
         SELECT id, NULL, NULL, properties::text as props
         FROM chunk_entity_relation."base"
         WHERE properties::text LIKE :fp
-    """), {"fp": fp_pattern}).fetchall()
-    logger.info(f"force_delete_graph: found {len(rows_v)} vertices to clean for doc {doc_id}")
+    """),
+        {"fp": fp_pattern},
+    ).fetchall()
+    logger.info(
+        f"force_delete_graph: found {len(rows_v)} vertices to clean for doc {doc_id}"
+    )
     _clean_graph_elements(conn, rows_v, chunk_ids, doc_id, is_edge=False)
 
 
@@ -421,7 +497,9 @@ def _escape_cypher_str(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
 
 
-def _clean_graph_elements(conn, elements, chunk_ids: list[str], doc_id: str, is_edge: bool) -> None:
+def _clean_graph_elements(
+    conn, elements, chunk_ids: list[str], doc_id: str, is_edge: bool
+) -> None:
     """Обновить или удалить элементы графа (nodes/edges) после очистки source_id."""
     chunk_set = set(chunk_ids)
     for eid, start_id, end_id, props_text in elements:
@@ -439,11 +517,15 @@ def _clean_graph_elements(conn, elements, chunk_ids: list[str], doc_id: str, is_
             else:
                 cypher = f"MATCH (n) WHERE id(n) = {eid} DETACH DELETE n"
             try:
-                conn.execute(text(
-                    f"SELECT * FROM cypher('chunk_entity_relation', "
-                    f"$${cypher}$$) AS (r agtype)"
-                ))
-                logger.debug(f"force_delete_graph: deleted orphan {'edge' if is_edge else 'vertex'} {eid}")
+                conn.execute(
+                    text(
+                        f"SELECT * FROM cypher('chunk_entity_relation', "
+                        f"$${cypher}$$) AS (r agtype)"
+                    )
+                )
+                logger.debug(
+                    f"force_delete_graph: deleted orphan {'edge' if is_edge else 'vertex'} {eid}"
+                )
             except Exception as e:
                 logger.warning(f"force_delete_graph: could not delete {eid}: {e}")
         else:
@@ -462,16 +544,22 @@ def _clean_graph_elements(conn, elements, chunk_ids: list[str], doc_id: str, is_
                     cypher = f"MATCH ()-[n]-() WHERE id(n) = {eid} SET {set_clause}"
                 else:
                     cypher = f"MATCH (n) WHERE id(n) = {eid} SET {set_clause}"
-                conn.execute(text(
-                    f"SELECT * FROM cypher('chunk_entity_relation', "
-                    f"$${cypher}$$) AS (r agtype)"
-                ))
-                logger.debug(f"force_delete_graph: cleaned {'edge' if is_edge else 'vertex'} {eid}")
+                conn.execute(
+                    text(
+                        f"SELECT * FROM cypher('chunk_entity_relation', "
+                        f"$${cypher}$$) AS (r agtype)"
+                    )
+                )
+                logger.debug(
+                    f"force_delete_graph: cleaned {'edge' if is_edge else 'vertex'} {eid}"
+                )
             except Exception as e:
                 logger.warning(f"force_delete_graph: could not update {eid}: {e}")
 
 
-def force_delete_doc(url: str, source_type: str, file_url: str | None, title: str) -> None:
+def force_delete_doc(
+    url: str, source_type: str, file_url: str | None, title: str
+) -> None:
     """Удалить документ и все его чанки из всех таблиц LightRAG и AGE-графа."""
     engine = get_engine()
     doc_key = make_doc_key(source_type, file_url, url, title)
@@ -488,20 +576,39 @@ def force_delete_doc(url: str, source_type: str, file_url: str | None, title: st
         chunk_ids = [row[0] for row in chunk_rows]
         logger.info(f"force_delete: doc_id={doc_id}, chunks={len(chunk_ids)}")
 
-        vdb_tables = conn.execute(text(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_name LIKE 'LIGHTRAG_VDB_CHUNKS%'"
-        )).fetchall()
+        vdb_tables = conn.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name LIKE 'LIGHTRAG_VDB_CHUNKS%'"
+            )
+        ).fetchall()
 
         for (vdb_table,) in vdb_tables:
-            conn.execute(text(f"DELETE FROM {vdb_table} WHERE full_doc_id = :doc_id"), {"doc_id": doc_id})
+            conn.execute(
+                text(f"DELETE FROM {vdb_table} WHERE full_doc_id = :doc_id"),
+                {"doc_id": doc_id},
+            )
             logger.info(f"force_delete: removed chunks from {vdb_table}")
 
-        conn.execute(text("DELETE FROM lightrag_doc_chunks WHERE full_doc_id = :doc_id"), {"doc_id": doc_id})
-        conn.execute(text("DELETE FROM lightrag_doc_full WHERE id = :doc_id"), {"doc_id": doc_id})
-        conn.execute(text("DELETE FROM lightrag_doc_status WHERE id = :doc_id"), {"doc_id": doc_id})
-        conn.execute(text("DELETE FROM lightrag_full_entities WHERE id = :doc_id"), {"doc_id": doc_id})
-        conn.execute(text("DELETE FROM lightrag_full_relations WHERE id = :doc_id"), {"doc_id": doc_id})
+        conn.execute(
+            text("DELETE FROM lightrag_doc_chunks WHERE full_doc_id = :doc_id"),
+            {"doc_id": doc_id},
+        )
+        conn.execute(
+            text("DELETE FROM lightrag_doc_full WHERE id = :doc_id"), {"doc_id": doc_id}
+        )
+        conn.execute(
+            text("DELETE FROM lightrag_doc_status WHERE id = :doc_id"),
+            {"doc_id": doc_id},
+        )
+        conn.execute(
+            text("DELETE FROM lightrag_full_entities WHERE id = :doc_id"),
+            {"doc_id": doc_id},
+        )
+        conn.execute(
+            text("DELETE FROM lightrag_full_relations WHERE id = :doc_id"),
+            {"doc_id": doc_id},
+        )
 
         try:
             conn.execute(text("LOAD 'age'"))
@@ -516,6 +623,7 @@ def force_delete_doc(url: str, source_type: str, file_url: str | None, title: st
 # ---------------------------------------------------------------------------
 # Source iterators (bulk mode)
 # ---------------------------------------------------------------------------
+
 
 async def iterate_confluence_help(limit: int | None = None):
     parser = ConfluenceHelpParser()
@@ -641,6 +749,46 @@ async def iterate_utmn(config: Config, limit: int | None = None):
                 count += 1
 
 
+async def iterate_utmn_contacts(limit: int | None = None):
+    from qa.kb.parsers.utmn_contacts import CONTACTS_URL
+
+    parser = UtmnContactsParser()
+    count = 0
+
+    parsed_docs = await parser.get_documents(CONTACTS_URL)
+    for doc in parsed_docs:
+        if limit and count >= limit:
+            return
+        yield Document(
+            url=doc.url,
+            title=doc.title,
+            text_content=doc.text_content,
+            source_type="utmn_contacts",
+            file_url=None,
+        )
+        count += 1
+
+
+async def iterate_utmn_faq(limit: int | None = None):
+    from qa.kb.parsers.utmn_faq import FAQ_BASE_URL
+
+    parser = UtmnFaqParser()
+    count = 0
+
+    parsed_docs = await parser.get_documents(FAQ_BASE_URL)
+    for doc in parsed_docs:
+        if limit and count >= limit:
+            return
+        yield Document(
+            url=doc.url,
+            title=doc.title,
+            text_content=doc.text_content,
+            source_type="utmn_faq",
+            file_url=None,
+        )
+        count += 1
+
+
 async def iterate_confluence_study(limit: int | None = None):
     parser = ConfluenceStudyParser()
 
@@ -648,6 +796,7 @@ async def iterate_confluence_study(limit: int | None = None):
     params = {"cql": "space.key=study order by id", "start": 0, "limit": 100}
 
     import httpx
+
     all_pages = []
 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -710,6 +859,7 @@ async def iterate_confluence_study(limit: int | None = None):
 # Main
 # ---------------------------------------------------------------------------
 
+
 async def run_incremental(urls: list[str], no_graph: bool, force: bool):
     """Инкрементальное индексирование конкретных URL."""
     logger.info("=" * 50)
@@ -721,11 +871,14 @@ async def run_incremental(urls: list[str], no_graph: bool, force: bool):
     await init_lightrag()
 
     from qa.main import get_lightrag
+
     rag = get_lightrag()
 
     if no_graph:
+
         async def _dummy_llm_func(prompt, **kwargs):
             return "[]"
+
         rag.llm_model_func = _dummy_llm_func
         logger.info("Graph building DISABLED (--no-graph)")
 
@@ -753,7 +906,9 @@ async def run_incremental(urls: list[str], no_graph: bool, force: bool):
             logger.warning(f"Не удалось распарсить: {url}")
             continue
 
-        if not force and doc_exists_in_db(doc.url, doc.source_type, doc.file_url, doc.title):
+        if not force and doc_exists_in_db(
+            doc.url, doc.source_type, doc.file_url, doc.title
+        ):
             logger.info(f"SKIP (уже в БД): {doc.title}")
             skipped += 1
             continue
@@ -766,7 +921,9 @@ async def run_incremental(urls: list[str], no_graph: bool, force: bool):
     logger.info("")
     logger.info("=" * 50)
     logger.info(f"Инкрементальное индексирование завершено")
-    logger.info(f"Всего URL: {len(urls)}, обработано: {total}, проиндексировано: {indexed}, пропущено: {skipped}")
+    logger.info(
+        f"Всего URL: {len(urls)}, обработано: {total}, проиндексировано: {indexed}, пропущено: {skipped}"
+    )
     logger.info("=" * 50)
 
 
@@ -783,11 +940,14 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
     await init_lightrag()
 
     from qa.main import get_lightrag
+
     rag = get_lightrag()
 
     if no_graph:
+
         async def _dummy_llm_func(prompt, **kwargs):
             return "[]"
+
         rag.llm_model_func = _dummy_llm_func
         logger.info("Graph building DISABLED (--no-graph)")
 
@@ -797,10 +957,17 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
         "confluence_help": ("Confluence Help", lambda: iterate_confluence_help(limit)),
         "sveden": ("Sveden", lambda: iterate_sveden(config, limit)),
         "utmn": ("Utmn", lambda: iterate_utmn(config, limit)),
-        "confluence_study": ("ConfluenceStudy", lambda: iterate_confluence_study(limit)),
+        "confluence_study": (
+            "ConfluenceStudy",
+            lambda: iterate_confluence_study(limit),
+        ),
+        "utmn_contacts": ("Utmn Contacts", lambda: iterate_utmn_contacts(limit)),
+        "utmn_faq": ("Utmn FAQ", lambda: iterate_utmn_faq(limit)),
     }
 
-    selected_sources = [source_filter] if source_filter != "all" else list(source_jobs.keys())
+    selected_sources = (
+        [source_filter] if source_filter != "all" else list(source_jobs.keys())
+    )
 
     total_docs = 0
     total_indexed = 0
@@ -835,9 +1002,13 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
                 continue
 
             if doc_count % 10 == 0:
-                logger.info(f"Прогресс: {doc_count} документов обработано, {skipped_count} пропущено")
+                logger.info(
+                    f"Прогресс: {doc_count} документов обработано, {skipped_count} пропущено"
+                )
 
-        logger.info(f"Источник {display_name}: {doc_count} документов, {indexed_count} проиндексировано, {skipped_count} пропущено")
+        logger.info(
+            f"Источник {display_name}: {doc_count} документов, {indexed_count} проиндексировано, {skipped_count} пропущено"
+        )
         total_docs += doc_count
         total_indexed += indexed_count
         total_skipped += skipped_count
@@ -871,7 +1042,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--source",
-        choices=["all", "confluence_help", "sveden", "utmn", "confluence_study"],
+        choices=[
+            "all",
+            "confluence_help",
+            "sveden",
+            "utmn",
+            "confluence_study",
+            "utmn_contacts",
+            "utmn_faq",
+        ],
         default="all",
         help="Индексировать только выбранный источник",
     )
