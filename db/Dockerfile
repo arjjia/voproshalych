@@ -1,19 +1,18 @@
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
-
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml src/ ./src/
 
-ENV UV_SYSTEM_PYTHON=1
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+        "sqlalchemy>=2.0.0" \
+        "alembic>=1.13.0" \
+        "psycopg2-binary>=2.9.0" \
+        "python-dotenv>=1.0.0"
 
-RUN uv sync
-
-COPY . .
+COPY alembic.ini migration/ ./
 
 ENV PYTHONPATH=/app/src
 
-EXPOSE 8000
-
-CMD ["uv", "run", "alembic", "upgrade", "head"]
+CMD ["alembic", "upgrade", "head"]

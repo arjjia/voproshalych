@@ -1,4 +1,4 @@
-FROM postgres:17-bookworm
+FROM postgres:17-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV GIT_CONFIG_COUNT=1
@@ -28,14 +28,13 @@ RUN git clone --branch PG17/v1.6.0-rc0 https://github.com/apache/age.git /tmp/ag
     make install && \
     rm -rf /tmp/age
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        libreadline-dev \
-        zlib1g-dev && \
-    apt-get remove -y build-essential git postgresql-server-dev-17 flex bison && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+FROM postgres:17-bookworm
+
+COPY --from=builder /usr/lib/postgresql/17/lib/vector.so /usr/lib/postgresql/17/lib/vector.so
+COPY --from=builder /usr/lib/postgresql/17/lib/age.so /usr/lib/postgresql/17/lib/age.so
+COPY --from=builder /usr/lib/postgresql/17/lib/bitcode/ /usr/lib/postgresql/17/lib/bitcode/
+COPY --from=builder /usr/share/postgresql/17/extension/vector* /usr/share/postgresql/17/extension/
+COPY --from=builder /usr/share/postgresql/17/extension/age* /usr/share/postgresql/17/extension/
 
 COPY init-extensions.sh /docker-entrypoint-initdb.d/
 
