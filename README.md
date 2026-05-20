@@ -32,10 +32,6 @@ docker compose ps
 Если нужно поднять сервисы с нуля и загрузить существующий дамп БД:
 
 ```bash
-# 0. Скопировать дамп и скрипт фикса OID в директорию проекта
-cp /path/to/your/dump.dump ./dump.dump
-cp scripts/fix_age_oid.sh ./fix_age_oid.sh
-
 # 1. Запустить только postgres и дождаться готовности
 docker compose up -d postgres
 docker compose ps postgres  # должен быть healthy
@@ -47,18 +43,10 @@ docker compose exec -T postgres pg_restore \
   < dump.dump
 
 # 3. Починить AGE OID (автоматически)
-docker compose exec -T postgres bash < fix_age_oid.sh
+docker compose exec -T postgres bash < scripts/fix_age_oid.sh
 
 # 4. Запустить остальные сервисы
 docker compose up -d
-
-# 5. Проверить, что AGE граф работает
-docker compose exec postgres psql -U voproshalych -d voproshalych -c "
-  LOAD 'age';
-  SET search_path = ag_catalog, public;
-  SELECT count(*) FROM cypher('chunk_entity_relation',
-    \$\$MATCH (n) RETURN n\$\$) AS (n agtype);
-"
 ```
 
 ### Переменные окружения
