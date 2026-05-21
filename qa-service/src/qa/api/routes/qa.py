@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 
-SEARCH_MODE = "mix"
+SEARCH_MODE = "naive"
 SEARCH_TOP_K_NO_RERANKER = 3
 
 
