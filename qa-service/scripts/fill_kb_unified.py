@@ -214,7 +214,10 @@ async def insert_document_to_lightrag(
         doc_id = hashlib.sha1(doc_key.encode("utf-8")).hexdigest()[:16]
 
         if no_graph:
-            await _insert_chunks_only(rag, content, doc_id, doc)
+            whole_doc = doc.source_type in WHOLE_DOC_SOURCES
+            await _insert_chunks_only(
+                rag, content, doc_id, doc, whole_doc=whole_doc
+            )
         else:
             await rag.ainsert(
                 [content],
@@ -230,8 +233,12 @@ async def insert_document_to_lightrag(
         return False
 
 
+WHOLE_DOC_SOURCES = {"utmn_faq"}
+
+
 async def _insert_chunks_only(
-    rag, content: str, doc_id: str, doc: Document
+    rag, content: str, doc_id: str, doc: Document,
+    whole_doc: bool = False,
 ) -> None:
     """Прямая вставка чанков + эмбеддингов без entity extraction.
 
@@ -242,6 +249,10 @@ async def _insert_chunks_only(
     - doc_status (статус документа)
 
     Не трогает: entities, relations, graph, llm_cache.
+
+    Args:
+        whole_doc: если True, не чанкать — вставить документ целиком
+            как один чанк (для FAQ и других коротких пар Q&A).
     """
     from lightrag.utils import compute_mdhash_id, sanitize_text_for_encoding
 
@@ -263,32 +274,46 @@ async def _insert_chunks_only(
         return
 
     tokenizer = get_lightrag_tokenizer()
-    kb_config = get_kb_config()
-    raw_chunks = sentence_aware_chunking(
-        tokenizer,
-        content,
-        chunk_token_size=kb_config.chunk_size,
-        chunk_overlap_token_size=kb_config.chunk_overlap,
-    )
 
-    inserting_chunks: dict[str, dict] = {}
-    chunk_texts: list[str] = []
-
-    for index, chunk_data in enumerate(raw_chunks):
-        chunk_text = sanitize_text_for_encoding(
-            chunk_data.get("content", "")
-        )
-        if not chunk_text.strip():
-            continue
-        chunk_key = compute_mdhash_id(chunk_text, prefix="chunk-")
-        inserting_chunks[chunk_key] = {
-            "content": chunk_text,
-            "full_doc_id": doc_key,
-            "tokens": chunk_data.get("tokens", len(tokenizer.encode(chunk_text))),
-            "chunk_order_index": index,
-            "file_path": file_path,
+    if whole_doc:
+        token_count = len(tokenizer.encode(content))
+        chunk_key = compute_mdhash_id(content, prefix="chunk-")
+        inserting_chunks: dict[str, dict] = {
+            chunk_key: {
+                "content": content,
+                "full_doc_id": doc_key,
+                "tokens": token_count,
+                "chunk_order_index": 0,
+                "file_path": file_path,
+            }
         }
-        chunk_texts.append(chunk_text)
+    else:
+        kb_config = get_kb_config()
+        raw_chunks = sentence_aware_chunking(
+            tokenizer,
+            content,
+            chunk_token_size=kb_config.chunk_size,
+            chunk_overlap_token_size=kb_config.chunk_overlap,
+        )
+
+        inserting_chunks = {}
+
+        for index, chunk_data in enumerate(raw_chunks):
+            chunk_text = sanitize_text_for_encoding(
+                chunk_data.get("content", "")
+            )
+            if not chunk_text.strip():
+                continue
+            chunk_key = compute_mdhash_id(chunk_text, prefix="chunk-")
+            inserting_chunks[chunk_key] = {
+                "content": chunk_text,
+                "full_doc_id": doc_key,
+                "tokens": chunk_data.get(
+                    "tokens", len(tokenizer.encode(chunk_text))
+                ),
+                "chunk_order_index": index,
+                "file_path": file_path,
+            }
 
     if not inserting_chunks:
         logger.warning("No chunks produced, skipping document")
@@ -322,8 +347,12 @@ async def _insert_chunks_only(
         if storage_inst is not None:
             await storage_inst.index_done_callback()
 
+    token_counts = [v["tokens"] for v in inserting_chunks.values()]
     logger.info(
-        "Inserted %d chunks (no-graph, direct)", len(inserting_chunks)
+        "Inserted %d chunks (no-graph, %s, tokens: %s)",
+        len(inserting_chunks),
+        "whole" if whole_doc else "chunked",
+        token_counts,
     )
 
 
