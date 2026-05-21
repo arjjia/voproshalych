@@ -81,7 +81,7 @@ def make_doc_key(
     base = normalize_url(file_url or page_url)
     if not base:
         base = f"{source_type}:{unquote(title)}"
-    payload = f"{source_type}:{base}"
+    payload = f"{source_type}:{base}:{unquote(title)}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -347,12 +347,10 @@ async def _insert_chunks_only(
         if storage_inst is not None:
             await storage_inst.index_done_callback()
 
-    token_counts = [v["tokens"] for v in inserting_chunks.values()]
     logger.info(
-        "Inserted %d chunks (no-graph, %s, tokens: %s)",
+        "Inserted %d chunks (no-graph, %s)",
         len(inserting_chunks),
         "whole" if whole_doc else "chunked",
-        token_counts,
     )
 
 
