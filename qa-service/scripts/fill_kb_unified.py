@@ -213,11 +213,14 @@ async def insert_document_to_lightrag(
         doc_key = make_doc_key(doc.source_type, doc.file_url, doc.url, doc.title)
         doc_id = hashlib.sha1(doc_key.encode("utf-8")).hexdigest()[:16]
 
-        await rag.ainsert(
-            [content],
-            ids=[doc_id],
-            file_paths=[doc.file_url or doc.url],
-        )
+        if no_graph:
+            await _insert_chunks_only(rag, content, doc_id, doc)
+        else:
+            await rag.ainsert(
+                [content],
+                ids=[doc_id],
+                file_paths=[doc.file_url or doc.url],
+            )
 
         logger.info(f"[{doc_idx}] Indexed: {doc.title}")
         return True
@@ -225,6 +228,103 @@ async def insert_document_to_lightrag(
     except Exception as e:
         logger.error(f"[{doc_idx}] Failed to index '{doc.title}': {e}")
         return False
+
+
+async def _insert_chunks_only(
+    rag, content: str, doc_id: str, doc: Document
+) -> None:
+    """Прямая вставка чанков + эмбеддингов без entity extraction.
+
+    Обходит pipeline LightRAG (ainsert) и пишет напрямую в:
+    - full_docs (полный текст документа)
+    - text_chunks (чанки)
+    - chunks_vdb (векторные эмбеддинги)
+    - doc_status (статус документа)
+
+    Не трогает: entities, relations, graph, llm_cache.
+    """
+    from lightrag.utils import compute_mdhash_id, sanitize_text_for_encoding
+
+    from qa.kb.embedding import get_embeddings_batch
+    from qa.lightrag_adapter import get_lightrag_tokenizer, sentence_aware_chunking
+
+    content = sanitize_text_for_encoding(content)
+    file_path = doc.file_url or doc.url
+
+    doc_key = f"doc-{doc_id}"
+    new_docs = {
+        doc_key: {"content": content, "file_path": file_path}
+    }
+
+    _add_doc_keys = await rag.full_docs.filter_keys({doc_key})
+    new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
+    if not new_docs:
+        logger.warning("Document already in storage, skipping")
+        return
+
+    tokenizer = get_lightrag_tokenizer()
+    kb_config = get_kb_config()
+    raw_chunks = sentence_aware_chunking(
+        tokenizer,
+        content,
+        chunk_token_size=kb_config.chunk_size,
+        chunk_overlap_token_size=kb_config.chunk_overlap,
+    )
+
+    inserting_chunks: dict[str, dict] = {}
+    chunk_texts: list[str] = []
+
+    for index, chunk_data in enumerate(raw_chunks):
+        chunk_text = sanitize_text_for_encoding(
+            chunk_data.get("content", "")
+        )
+        if not chunk_text.strip():
+            continue
+        chunk_key = compute_mdhash_id(chunk_text, prefix="chunk-")
+        inserting_chunks[chunk_key] = {
+            "content": chunk_text,
+            "full_doc_id": doc_key,
+            "tokens": chunk_data.get("tokens", len(tokenizer.encode(chunk_text))),
+            "chunk_order_index": index,
+            "file_path": file_path,
+        }
+        chunk_texts.append(chunk_text)
+
+    if not inserting_chunks:
+        logger.warning("No chunks produced, skipping document")
+        return
+
+    add_chunk_keys = await rag.text_chunks.filter_keys(
+        set(inserting_chunks.keys())
+    )
+    inserting_chunks = {
+        k: v for k, v in inserting_chunks.items() if k in add_chunk_keys
+    }
+    if not inserting_chunks:
+        logger.warning("All chunks already in storage")
+        return
+
+    chunk_list = list(inserting_chunks.items())
+    chunk_texts_for_embed = [v["content"] for _, v in chunk_list]
+    embeddings = get_embeddings_batch(chunk_texts_for_embed)
+    for i, (chunk_key, chunk_data) in enumerate(chunk_list):
+        chunk_data["embedding"] = embeddings[i]
+
+    await rag.chunks_vdb.upsert(inserting_chunks)
+    await rag.full_docs.upsert(new_docs)
+    await rag.text_chunks.upsert(inserting_chunks)
+
+    for storage_inst in [
+        rag.full_docs,
+        rag.text_chunks,
+        rag.chunks_vdb,
+    ]:
+        if storage_inst is not None:
+            await storage_inst.index_done_callback()
+
+    logger.info(
+        "Inserted %d chunks (no-graph, direct)", len(inserting_chunks)
+    )
 
 
 def _extract_title_from_url(url: str) -> str:
@@ -875,12 +975,10 @@ async def run_incremental(urls: list[str], no_graph: bool, force: bool):
     rag = get_lightrag()
 
     if no_graph:
-
-        async def _dummy_llm_func(prompt, **kwargs):
-            return "[]"
-
-        rag.llm_model_func = _dummy_llm_func
-        logger.info("Graph building DISABLED (--no-graph)")
+        logger.info(
+            "Graph building DISABLED (--no-graph): "
+            "direct chunk+embedding insertion, no entity extraction"
+        )
 
     total = 0
     indexed = 0
@@ -944,12 +1042,10 @@ async def run_bulk(clear: bool, source_filter: str, limit: int | None, no_graph:
     rag = get_lightrag()
 
     if no_graph:
-
-        async def _dummy_llm_func(prompt, **kwargs):
-            return "[]"
-
-        rag.llm_model_func = _dummy_llm_func
-        logger.info("Graph building DISABLED (--no-graph)")
+        logger.info(
+            "Graph building DISABLED (--no-graph): "
+            "direct chunk+embedding insertion, no entity extraction"
+        )
 
     config = Config()
 
