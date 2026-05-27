@@ -32,9 +32,19 @@ _BUCKET_EXPR = {
     "year": "date_trunc('year', m.created_at)",
 }
 
-_UNANSWERED_SQL_EXPR = """
+_SOURCE_LINKS_JSON_EXPR = "COALESCE(qa.source_links, '[]'::jsonb)"
+
+_NO_STATUS_SQL_EXPR = """
+(
+    COALESCE(qa.admin_status_override, '') = ''
+    AND qa.relevance_type IS NULL
+)
+"""
+
+_UNANSWERED_SQL_EXPR = f"""
 (
     COALESCE(qa.admin_status_override, '') NOT IN ('answered', 'document_added')
+    AND NOT {_NO_STATUS_SQL_EXPR}
     AND (
     COALESCE(qa.relevance_type = 'b', false)
     OR (
@@ -45,11 +55,10 @@ _UNANSWERED_SQL_EXPR = """
 )
 """
 
-_SOURCE_LINKS_JSON_EXPR = "COALESCE(qa.source_links, '[]'::jsonb)"
-
 _NOT_CONFLUENCE_SQL_EXPR = f"""
 (
     COALESCE(qa.admin_status_override, '') NOT IN ('answered', 'document_added')
+    AND NOT {_NO_STATUS_SQL_EXPR}
     AND
     COALESCE(qa.relevance_type, '') <> 'b'
     AND (
@@ -261,10 +270,13 @@ def fetch_qa_pairs(
         filters.append(_NOT_CONFLUENCE_SQL_EXPR)
     elif status == "answered":
         filters.append("COALESCE(qa.admin_status_override, '') <> 'document_added'")
+        filters.append(f"NOT {_NO_STATUS_SQL_EXPR}")
         filters.append(f"NOT {_UNANSWERED_SQL_EXPR}")
         filters.append(f"NOT {_NOT_CONFLUENCE_SQL_EXPR}")
     elif status == "document_added":
         filters.append("qa.admin_status_override = 'document_added'")
+    elif status == "no_status":
+        filters.append(_NO_STATUS_SQL_EXPR)
 
     where_clause = "WHERE " + " AND ".join(filters)
 
@@ -297,6 +309,7 @@ def fetch_qa_pairs(
                 {_UNANSWERED_SQL_EXPR} AS is_unanswered,
                 {_NOT_CONFLUENCE_SQL_EXPR} AS is_not_confluence,
                 qa.admin_status_override = 'document_added' AS is_document_added,
+                {_NO_STATUS_SQL_EXPR} AS is_no_status,
                 t.id AS task_id,
                 t.status AS task_status,
                 COALESCE(chunk_src.sources, link_src.sources, '[]'::json) AS sources
@@ -322,6 +335,7 @@ def fetch_qa_pairs(
             is_unanswered=bool(row.is_unanswered),
             is_not_confluence=bool(row.is_not_confluence),
             is_document_added=bool(row.is_document_added),
+            is_no_status=bool(row.is_no_status),
             task_id=row.task_id,
             task_status=row.task_status,
             sources=[Source(**s) for s in (row.sources or [])],
@@ -698,6 +712,7 @@ def _fetch_admin_tasks(db: Session, where_clause: str, params: dict) -> list[Adm
                 {_UNANSWERED_SQL_EXPR} AS is_unanswered,
                 {_NOT_CONFLUENCE_SQL_EXPR} AS is_not_confluence,
                 qa.admin_status_override = 'document_added' AS is_document_added,
+                {_NO_STATUS_SQL_EXPR} AS is_no_status,
                 COALESCE(chunk_src.sources, link_src.sources, '[]'::json) AS sources,
                 t.created_at AS created_at,
                 t.updated_at AS updated_at
@@ -737,6 +752,7 @@ def _fetch_admin_tasks(db: Session, where_clause: str, params: dict) -> list[Adm
             is_unanswered=bool(row.is_unanswered),
             is_not_confluence=bool(row.is_not_confluence),
             is_document_added=bool(row.is_document_added),
+            is_no_status=bool(row.is_no_status),
             sources=[Source(**s) for s in (row.sources or [])],
             created_at=row.created_at,
             updated_at=row.updated_at,

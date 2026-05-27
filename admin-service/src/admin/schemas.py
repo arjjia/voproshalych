@@ -8,7 +8,13 @@ from pydantic import BaseModel
 
 Platform = Literal["telegram", "vk", "max"]
 Period = Literal["day", "week", "month", "year"]
-QAStatus = Literal["answered", "unanswered", "not_confluence", "document_added"]
+QAStatus = Literal[
+    "answered",
+    "unanswered",
+    "not_confluence",
+    "document_added",
+    "no_status",
+]
 TaskStatus = Literal["added", "in_progress", "done", "on_hold"]
 
 
@@ -56,6 +62,7 @@ class QAPair(BaseModel):
     is_unanswered: bool = False
     is_not_confluence: bool = False
     is_document_added: bool = False
+    is_no_status: bool = False
     task_id: int | None = None
     task_status: TaskStatus | None = None
     sources: list[Source] = []
@@ -85,6 +92,7 @@ class AdminTask(BaseModel):
     is_unanswered: bool = False
     is_not_confluence: bool = False
     is_document_added: bool = False
+    is_no_status: bool = False
     sources: list[Source] = []
     created_at: datetime
     updated_at: datetime

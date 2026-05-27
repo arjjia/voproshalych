@@ -38,7 +38,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/qa", tags=["qa"])
 
-SEARCH_TOP_K = 3
+SEARCH_MODE = "mix"
+SEARCH_TOP_K = 5
+SEARCH_FALLBACK_MODE = "hybrid"
+SEARCH_FALLBACK_TOP_K = 8
+MIN_SEARCH_CONTEXT_CHARS = 700
 
 
 def _get_timeouts() -> dict:
@@ -51,7 +55,10 @@ def _get_timeouts() -> dict:
     }
 
 
-def _format_search_context(data: dict, max_chunks: int = SEARCH_TOP_K) -> tuple[str, dict[str, str]]:
+def _format_search_context(
+    data: dict,
+    max_chunks: int = SEARCH_TOP_K,
+) -> tuple[str, dict[str, str]]:
     """Преобразовать результат aquery_data в текстовый контекст для LLM.
 
     Берёт ровно max_chunks первых чанков (ранжированных cfgA).
@@ -101,6 +108,29 @@ def _format_search_context(data: dict, max_chunks: int = SEARCH_TOP_K) -> tuple[
 
     context = "--- Найденная информация ---\n" + "\n---\n".join(chunk_texts)
     return context, source_index
+
+
+async def _search_kb(
+    rag,
+    query_param_cls,
+    query: str,
+    *,
+    mode: str,
+    top_k: int,
+    timeout: float,
+) -> tuple[str, dict[str, str], dict, int]:
+    """Выполнить поиск и вернуть подготовленный контекст для LLM."""
+    search_data = await asyncio.wait_for(
+        rag.aquery_data(
+            query,
+            param=query_param_cls(mode=mode, top_k=top_k),
+        ),
+        timeout=timeout,
+    )
+    context, source_index = _format_search_context(search_data, max_chunks=top_k)
+    keywords = _extract_keywords_from_data(search_data)
+    chunks_count = len((search_data.get("data", {}) or {}).get("chunks", []) or [])
+    return context, source_index, keywords, chunks_count
 
 def _extract_keywords_from_data(data: dict) -> dict:
     """Извлечь ключевые слова из метаданных результата поиска."""
@@ -258,25 +288,63 @@ async def _handle_kb_question(
 
     try:
         logger.info(
-            f"[{req_id}] Phase 2a START: aquery_data(mode=local, top_k={SEARCH_TOP_K})\n"
+            f"[{req_id}] Phase 2a START: "
+            f"aquery_data(mode={SEARCH_MODE}, top_k={SEARCH_TOP_K})\n"
             f"[{req_id}]   search_query: '{search_query[:120]}'"
         )
 
-        search_data = await asyncio.wait_for(
-            rag.aquery_data(
-                search_query,
-                param=QueryParam(mode="local", top_k=SEARCH_TOP_K),
-            ),
+        search_context, source_index, keywords, chunks_count = await _search_kb(
+            rag,
+            QueryParam,
+            search_query,
+            mode=SEARCH_MODE,
+            top_k=SEARCH_TOP_K,
             timeout=timeouts["lightrag"],
         )
-        t2_elapsed = time.time() - t2_start
 
-        search_context, source_index = _format_search_context(search_data)
-        keywords = _extract_keywords_from_data(search_data)
+        should_fallback = (
+            not search_context.strip()
+            or chunks_count == 0
+            or len(search_context) < MIN_SEARCH_CONTEXT_CHARS
+        )
+
+        if should_fallback:
+            logger.info(
+                f"[{req_id}] Phase 2a FALLBACK START: "
+                f"aquery_data(mode={SEARCH_FALLBACK_MODE}, "
+                f"top_k={SEARCH_FALLBACK_TOP_K}); "
+                f"primary_context_len={len(search_context)}, "
+                f"primary_chunks={chunks_count}"
+            )
+            (
+                fallback_context,
+                fallback_source_index,
+                fallback_keywords,
+                fallback_chunks_count,
+            ) = await _search_kb(
+                rag,
+                QueryParam,
+                search_query,
+                mode=SEARCH_FALLBACK_MODE,
+                top_k=SEARCH_FALLBACK_TOP_K,
+                timeout=timeouts["lightrag"],
+            )
+
+            if len(fallback_context) > len(search_context):
+                search_context = fallback_context
+                source_index = fallback_source_index
+                keywords = fallback_keywords
+                chunks_count = fallback_chunks_count
+                logger.info(f"[{req_id}] Phase 2a FALLBACK USED")
+            else:
+                logger.info(f"[{req_id}] Phase 2a FALLBACK SKIPPED")
+
+        t2_elapsed = time.time() - t2_start
 
         logger.info(
             f"[{req_id}] Phase 2a DONE: search — {t2_elapsed:.1f}s\n"
-            f"[{req_id}]   context_len={len(search_context)}, "
+            f"[{req_id}]   mode={SEARCH_MODE}, top_k={SEARCH_TOP_K}, "
+            f"context_len={len(search_context)}, chunks={chunks_count}, "
             f"sources_indexed={len(source_index)}, "
             f"keywords_HL={keywords.get('high_level', [])[:5]}"
         )

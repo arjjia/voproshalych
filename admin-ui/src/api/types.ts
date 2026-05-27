@@ -1,6 +1,11 @@
 export type Platform = "telegram" | "vk" | "max";
 export type Period = "day" | "week" | "month" | "year";
-export type QAStatus = "answered" | "unanswered" | "not_confluence" | "document_added";
+export type QAStatus =
+  | "answered"
+  | "unanswered"
+  | "not_confluence"
+  | "document_added"
+  | "no_status";
 export type TaskStatus = "added" | "in_progress" | "done" | "on_hold";
 
 export interface PlatformCount {
@@ -47,6 +52,7 @@ export interface QAPair {
   is_unanswered: boolean;
   is_not_confluence: boolean;
   is_document_added: boolean;
+  is_no_status: boolean;
   task_id: number | null;
   task_status: TaskStatus | null;
   sources: Source[];

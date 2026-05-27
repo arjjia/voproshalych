@@ -189,7 +189,6 @@ class DialogService:
 
             keywords_json = json.dumps(keywords, ensure_ascii=False) if keywords else None
             relevant_sources_json = json.dumps(relevant_sources, ensure_ascii=False) if relevant_sources else None
-            source_links_json = json.dumps(source_links, ensure_ascii=False) if source_links else None
 
             session.add(
                 QuestionAnswerLink(
@@ -200,7 +199,7 @@ class DialogService:
                     normalized_context=normalized_context,
                     relevance_type=relevance_type,
                     relevant_sources=relevant_sources_json,
-                    source_links=source_links_json,
+                    source_links=source_links,
                 )
             )
             (

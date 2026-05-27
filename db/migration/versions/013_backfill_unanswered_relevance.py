@@ -1,4 +1,4 @@
-"""Заполнить relevance_type для исторических неотвеченных ответов.
+"""Сохранить ревизию для исторических данных без изменения записей.
 
 Revision ID: 013_unanswered_backfill
 Revises: 012_relevant_sources
@@ -15,26 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        UPDATE questions_answers qa
-        SET relevance_type = 'b'
-        FROM messages am
-        WHERE qa.answer_id = am.id
-          AND qa.relevance_type IS NULL
-          AND am.content ILIKE '%нет информации из официальной базы знаний%';
-        """
-    )
+    pass
 
 
 def downgrade() -> None:
-    op.execute(
-        """
-        UPDATE questions_answers qa
-        SET relevance_type = NULL
-        FROM messages am
-        WHERE qa.answer_id = am.id
-          AND qa.relevance_type = 'b'
-          AND am.content ILIKE '%нет информации из официальной базы знаний%';
-        """
-    )
+    pass

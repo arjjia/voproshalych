@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ExternalLink,
   FileText,
+  MinusCircle,
   XCircle,
 } from "lucide-react";
 import {
@@ -36,6 +37,7 @@ const STATUS_OPTIONS = [
   { value: "unanswered", label: "Не отвечен" },
   { value: "not_confluence", label: "Нет в Confluence" },
   { value: "document_added", label: "Документ добавлен" },
+  { value: "no_status", label: "Без статуса" },
 ];
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
@@ -67,6 +69,17 @@ function getPairStatus(pair: QAPair) {
       badgeClass: "bg-cyan-100 text-cyan-800",
       rowClass: "border-cyan-200 bg-cyan-50/70",
       accentClass: "text-cyan-800",
+    };
+  }
+
+  if (pair.is_no_status) {
+    return {
+      label: "Без статуса",
+      description: "поля классификации не заполнены",
+      icon: MinusCircle,
+      badgeClass: "bg-slate-100 text-slate-600",
+      rowClass: "border-slate-200 bg-slate-50/70",
+      accentClass: "text-slate-600",
     };
   }
 
