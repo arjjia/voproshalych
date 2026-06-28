@@ -2,7 +2,7 @@
 
 Источники:
 - dialog_context: 3 сообщения, до 300 символов (dialog_service.build_context)
-- search_context: top_k=3 чанка (LightRAG, mode=local)
+- search_context: чанки LightRAG, подготовленные QA route
 - question: до 500 символов
 """
 

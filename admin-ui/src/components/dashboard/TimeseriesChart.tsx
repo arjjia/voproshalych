@@ -1,6 +1,6 @@
 import {
-  Area,
-  AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -46,13 +46,7 @@ export function TimeseriesChart({ points, period, loading }: Props) {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-              <defs>
-                <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#005BAA" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#005BAA" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
+            <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E3E8EF" />
               <XAxis
                 dataKey="label"
@@ -73,14 +67,14 @@ export function TimeseriesChart({ points, period, loading }: Props) {
                 labelStyle={{ color: "#00335C", fontWeight: 600 }}
                 formatter={(value: number) => [value, "вопросов"]}
               />
-              <Area
-                type="monotone"
+              <Bar
                 dataKey="count"
-                stroke="#005BAA"
-                strokeWidth={2}
-                fill="url(#chartFill)"
+                fill="#005BAA"
+                radius={[6, 6, 0, 0]}
+                maxBarSize={48}
+                activeBar={{ fill: "#005BAA" }}
               />
-            </AreaChart>
+            </BarChart>
           </ResponsiveContainer>
         )}
       </div>

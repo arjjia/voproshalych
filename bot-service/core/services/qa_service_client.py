@@ -97,6 +97,7 @@ class QAServiceClient:
             "model": payload.get("model", ""),
             "sources": payload.get("sources", []),
             "question_type": payload.get("question_type", 1),
+            "relevance_type": payload.get("relevance_type"),
             "relevant_sources": payload.get("relevant_sources"),
         }
 

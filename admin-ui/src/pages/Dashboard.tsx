@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarCheck, MessageSquare, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, CalendarCheck, MessageSquare, ShieldAlert, TrendingUp, Users } from "lucide-react";
 import { getOverview, getTimeseries } from "@/api/endpoints";
 import type { Period } from "@/api/types";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -46,7 +46,7 @@ export function DashboardPage() {
         description="Общая статистика работы Вопрошалыча"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
         <MetricCard
           title="Всего пользователей"
           value={overview?.users_total}
@@ -70,6 +70,22 @@ export function DashboardPage() {
           value={overview?.questions_today}
           icon={CalendarCheck}
           loading={overviewQuery.isLoading}
+        />
+        <MetricCard
+          title="Неотвеченных"
+          value={overview?.unanswered_questions_total}
+          icon={AlertTriangle}
+          loading={overviewQuery.isLoading}
+          tone="danger"
+          hint="нет информации в БЗ"
+        />
+        <MetricCard
+          title="Нет в Confluence"
+          value={overview?.not_confluence_questions_total}
+          icon={ShieldAlert}
+          loading={overviewQuery.isLoading}
+          tone="warning"
+          hint="источник utmn/sveden"
         />
       </div>
 

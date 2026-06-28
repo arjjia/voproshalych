@@ -9,6 +9,15 @@ from models.callback import CallbackEvent
 from models.message import IncomingMessage
 
 
+def _user_identity_from_metadata(metadata: dict) -> tuple[str | None, str | None, str | None]:
+    """Нормализует отображаемые поля пользователя из metadata разных платформ."""
+
+    username = metadata.get("username") or metadata.get("sender_name")
+    first_name = metadata.get("first_name")
+    last_name = metadata.get("last_name")
+    return username, first_name, last_name
+
+
 class UserService:
     """Создает и обновляет пользователей в базе данных."""
 
@@ -34,19 +43,20 @@ class UserService:
             )
 
             metadata = message.metadata or {}
+            username, first_name, last_name = _user_identity_from_metadata(metadata)
             if user is None:
                 user = User(
                     platform=message.platform.value,
                     platform_user_id=message.user_id,
-                    username=metadata.get("username"),
-                    first_name=metadata.get("first_name"),
-                    last_name=metadata.get("last_name"),
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name,
                 )
                 session.add(user)
             else:
-                user.username = metadata.get("username") or user.username
-                user.first_name = metadata.get("first_name") or user.first_name
-                user.last_name = metadata.get("last_name") or user.last_name
+                user.username = username or user.username
+                user.first_name = first_name or user.first_name
+                user.last_name = last_name or user.last_name
                 user.updated_at = func.now()
 
             session.commit()

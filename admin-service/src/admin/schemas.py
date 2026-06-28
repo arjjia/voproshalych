@@ -8,6 +8,14 @@ from pydantic import BaseModel
 
 Platform = Literal["telegram", "vk", "max"]
 Period = Literal["day", "week", "month", "year"]
+QAStatus = Literal[
+    "answered",
+    "unanswered",
+    "not_confluence",
+    "document_added",
+    "no_status",
+]
+TaskStatus = Literal["added", "in_progress", "done", "on_hold"]
 
 
 class PlatformCount(BaseModel):
@@ -21,6 +29,8 @@ class Overview(BaseModel):
     questions_total: int
     questions_today: int
     questions_last_month: int
+    unanswered_questions_total: int
+    not_confluence_questions_total: int
     active_users_last_month: int
 
 
@@ -47,9 +57,14 @@ class QAPair(BaseModel):
     question: str
     answer: str | None
     platform: str | None
-    username: str | None
     asked_at: datetime
     model_used: str | None
+    is_unanswered: bool = False
+    is_not_confluence: bool = False
+    is_document_added: bool = False
+    is_no_status: bool = False
+    task_id: int | None = None
+    task_status: TaskStatus | None = None
     sources: list[Source] = []
 
 
@@ -62,6 +77,75 @@ class PageMeta(BaseModel):
 class QAPageResponse(BaseModel):
     items: list[QAPair]
     meta: PageMeta
+
+
+class AdminTask(BaseModel):
+    id: int
+    question_id: int
+    answer_id: int | None
+    question: str
+    answer: str | None
+    platform: str | None
+    asked_at: datetime
+    model_used: str | None
+    status: TaskStatus
+    is_unanswered: bool = False
+    is_not_confluence: bool = False
+    is_document_added: bool = False
+    is_no_status: bool = False
+    sources: list[Source] = []
+    created_at: datetime
+    updated_at: datetime
+
+
+class TasksResponse(BaseModel):
+    items: list[AdminTask]
+
+
+class TaskReportItem(BaseModel):
+    id: int
+    task_id: int | None
+    question_id: int
+    answer_id: int | None
+    question: str
+    answer: str | None
+    platform: str | None
+    asked_at: datetime
+    model_used: str | None
+    sources: list[Source] = []
+    created_at: datetime
+    restored_at: datetime | None = None
+    restored_task_id: int | None = None
+
+
+class TaskReport(BaseModel):
+    id: int
+    created_at: datetime
+    tasks_count: int
+    items: list[TaskReportItem] = []
+
+
+class TaskReportSummary(BaseModel):
+    id: int
+    created_at: datetime
+    tasks_count: int
+
+
+class TaskReportsResponse(BaseModel):
+    items: list[TaskReportSummary]
+    meta: PageMeta
+
+
+class CreateTaskRequest(BaseModel):
+    question_id: int
+
+
+class UpdateTaskStatusRequest(BaseModel):
+    status: TaskStatus
+
+
+class TaskActionResponse(BaseModel):
+    ok: bool
 
 
 class UserRow(BaseModel):

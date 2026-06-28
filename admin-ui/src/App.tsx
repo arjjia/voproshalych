@@ -4,6 +4,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { DashboardPage } from "@/pages/Dashboard";
 import { LoginPage } from "@/pages/Login";
 import { QAPairsPage } from "@/pages/QAPairs";
+import { TasksPage } from "@/pages/Tasks";
 import { UsersPage } from "@/pages/Users";
 import { AUTH_CHANGED_EVENT, hasStoredCredentials } from "@/lib/auth";
 
@@ -34,6 +35,7 @@ export function App() {
         >
           <Route index element={<DashboardPage />} />
           <Route path="/qa" element={<QAPairsPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
           <Route path="/users" element={<UsersPage />} />
         </Route>
         <Route path="*" element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />} />
