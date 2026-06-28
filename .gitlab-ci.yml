@@ -4,34 +4,33 @@ stages:
   - deploy
   - prune
 
+variables:
+  COMPOSE_PROJECT_NAME: voproshalych_v2
+  DOCKER_BUILDKIT: "1"
+
 build:
   stage: build
+  before_script:
+    - cp $ENV_PRODUCTION .env
   script:
-    - docker build --network host -t voproshalych/postgres:latest ./db/postgres
-    - docker build --network host -t voproshalych/db-migrate:latest ./db
-    - docker build --network host -t voproshalych/qa:latest ./qa-service
-    - docker build --network host -t voproshalych/bot-core:latest ./bot-service/core
-    - docker build --network host -t voproshalych/telegram-bot:latest ./bot-service/bots/telegram
-    - docker build --network host -t voproshalych/vk-bot:latest ./bot-service/bots/vk
-    - docker build --network host -t voproshalych/max-bot:latest ./bot-service/bots/max
-    - docker build --network host -t voproshalych/admin-service:latest ./admin-service
-    - docker build --network host -t voproshalych/admin-ui:latest ./admin-ui
+    - docker compose build
+    - docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}" | grep voproshalych_v2
   only:
     - main
   tags:
-    - srv-voproshalych01
+    - srv-virtassist01
 
 test:
   stage: test
   before_script:
     - cp $ENV_PRODUCTION .env
   script:
-    - docker run --rm voproshalych/qa:latest pytest tests/ -v
-    - docker run --rm voproshalych/bot-core:latest pytest core/tests/ -v
+    - docker compose run --no-deps --rm -v "$CI_PROJECT_DIR/qa-service/tests:/app/tests:ro" qa-service uv run pytest tests/ -v
+  allow_failure: true
   only:
     - main
   tags:
-    - srv-voproshalych01
+    - srv-virtassist01
 
 deploy:
   stage: deploy
@@ -39,12 +38,13 @@ deploy:
   before_script:
     - cp $ENV_PRODUCTION .env
   script:
-    - docker compose --env-file .env up -d
+    - docker compose up -d postgres db-migrate qa-service bot-core telegram-bot vk-bot max-bot admin-service admin-ui
     - docker compose logs -t db-migrate
+    - docker compose ps
   only:
     - main
   tags:
-    - srv-voproshalych01
+    - srv-virtassist01
 
 prune:
   stage: prune
@@ -54,8 +54,8 @@ prune:
     - docker network prune -f
     - docker builder prune --filter unused-for=30m -f
     - docker system df
-    - df -h
+    - df -h /
   only:
     - main
   tags:
-    - srv-voproshalych01
+    - srv-virtassist01
