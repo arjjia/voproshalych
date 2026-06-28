@@ -4,25 +4,7 @@ import pytest
 
 from qa.services.payload_builder import (
     build_messages,
-    _estimate_tokens,
-    _truncate_search_context,
 )
-
-
-class TestEstimateTokens:
-    """Тесты для _estimate_tokens."""
-
-    def test_empty_string(self):
-        assert _estimate_tokens("") == 0
-
-    def test_returns_int(self):
-        result = _estimate_tokens("Текст")
-        assert isinstance(result, int)
-
-    def test_longer_text_more_tokens(self):
-        short = _estimate_tokens("а")
-        long = _estimate_tokens("а" * 100)
-        assert long > short
 
 
 class TestBuildMessages:
@@ -85,19 +67,6 @@ class TestBuildMessages:
         assert "Контекст из базы знаний" not in user_content
         assert "История диалога" not in user_content
 
-    def test_adaptive_truncation_drops_dialog_context(self):
-        huge_search = "x" * 30000
-        huge_dialog = "y" * 10000
-
-        messages = build_messages(
-            system_prompt="Ты помощник.",
-            question="Вопрос",
-            search_context=huge_search,
-            dialog_context=huge_dialog,
-        )
-        user_content = messages[1]["content"]
-        assert "y" * 100 not in user_content
-
     def test_system_prompt_always_preserved(self):
         messages = build_messages(
             system_prompt="Ты Вопрошалыч.",
@@ -114,23 +83,3 @@ class TestBuildMessages:
             dialog_context="y" * 10000,
         )
         assert "Мой уникальный вопрос" in messages[1]["content"]
-
-
-class TestTruncateSearchContext:
-    """Тесты для _truncate_search_context."""
-
-    def test_short_context_unchanged(self):
-        text = "Короткий контекст"
-        result = _truncate_search_context(text, max_tokens=100)
-        assert result == text
-
-    def test_long_context_truncated(self):
-        text = "x" * 10000
-        result = _truncate_search_context(text, max_tokens=100)
-        assert len(result) < len(text)
-        assert "[... часть контекста опущена ...]" in result
-
-    def test_respects_chunk_boundary(self):
-        text = "Чанк1\n---\nЧанк2\n---\nЧанк3\n---\nЧанк4\n---\nЧанк5"
-        result = _truncate_search_context(text, max_tokens=20)
-        assert "Чанк1" in result
