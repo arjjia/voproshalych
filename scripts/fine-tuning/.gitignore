@@ -1,0 +1,11 @@
+.env
+
+.venv/
+env/
+venv/
+
+__pycache__/
+*.pyc
+
+finetuned_bge_m3_v1/
+*.jsonl
