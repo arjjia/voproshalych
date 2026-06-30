@@ -45,5 +45,6 @@ pkg/
 # Benchmarks data
 qa-service/benchmarks/data
 
-# Images
-.images/Makefile
+# Deployment
+Makefile
+.images/
