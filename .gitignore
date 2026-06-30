@@ -43,4 +43,7 @@ pkg/
 .vscode/
 
 # Benchmarks data
-qa-service/benchmarks/data.images/
+qa-service/benchmarks/data
+
+# Images
+.images/Makefile
