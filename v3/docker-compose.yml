@@ -1,0 +1,255 @@
+name: voproshalych-v3
+
+services:
+  postgres:
+    build:
+      context: ./db/postgres
+      dockerfile: Dockerfile
+    container_name: v3-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
+      POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "psql", "-h", "localhost", "-p", "5432", "-U", "voproshalych", "-d", "voproshalych", "-c", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - v3-net
+
+  db-migrate:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: v3-db-migrate
+    restart: "no"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-voproshalych}
+      POSTGRES_USER: ${POSTGRES_USER:-voproshalych}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voproshalych}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - v3-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: v3-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - v3-net
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: v3-litellm
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    env_file:
+      - .env
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-master-key-v3}
+      LITELLM_CONFIG_FILE: /app/config.yaml
+      DATABASE_URL: postgresql://voproshalych:voproshalych@postgres:5432/voproshalych
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - v3-net
+
+  kb-service:
+    build:
+      context: ./kb-service
+      dockerfile: Dockerfile
+    container_name: v3-kb-service
+    restart: unless-stopped
+    ports:
+      - "8005:8004"
+    env_file:
+      - .env
+    environment:
+      KB_PORT: 8004
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - v3-net
+
+  mcp-kb:
+    build:
+      context: ./mcp-servers
+      dockerfile: Dockerfile.kb
+    container_name: v3-mcp-kb
+    restart: unless-stopped
+    ports:
+      - "${MCP_KB_PORT:-9010}:9010"
+    env_file:
+      - .env
+    environment:
+      MCP_SERVER_TYPE: kb
+      MCP_PORT: 9010
+      QA_SERVICE_URL: http://kb-service:8004
+    depends_on:
+      kb-service:
+        condition: service_started
+    networks:
+      - v3-net
+
+  mcp-news:
+    build:
+      context: ./mcp-servers
+      dockerfile: Dockerfile.public
+    container_name: v3-mcp-news
+    restart: unless-stopped
+    ports:
+      - "${MCP_NEWS_PORT:-9011}:9011"
+    env_file:
+      - .env
+    environment:
+      MCP_SERVER_TYPE: news
+      MCP_PORT: 9011
+    networks:
+      - v3-net
+
+  mcp-contacts:
+    build:
+      context: ./mcp-servers
+      dockerfile: Dockerfile.public
+    container_name: v3-mcp-contacts
+    restart: unless-stopped
+    ports:
+      - "${MCP_CONTACTS_PORT:-9012}:9012"
+    env_file:
+      - .env
+    environment:
+      MCP_SERVER_TYPE: contacts
+      MCP_PORT: 9012
+    networks:
+      - v3-net
+
+  mcp-library:
+    build:
+      context: ./mcp-servers
+      dockerfile: Dockerfile.public
+    container_name: v3-mcp-library
+    restart: unless-stopped
+    ports:
+      - "${MCP_LIBRARY_PORT:-9013}:9013"
+    env_file:
+      - .env
+    environment:
+      MCP_SERVER_TYPE: library
+      MCP_PORT: 9013
+    networks:
+      - v3-net
+
+  mcp-sveden:
+    build:
+      context: ./mcp-servers
+      dockerfile: Dockerfile.public
+    container_name: v3-mcp-sveden
+    restart: unless-stopped
+    ports:
+      - "${MCP_SVEDEN_PORT:-9014}:9014"
+    env_file:
+      - .env
+    environment:
+      MCP_SERVER_TYPE: sveden
+      MCP_PORT: 9014
+    networks:
+      - v3-net
+
+  agent-service:
+    build:
+      context: ./agent-service
+      dockerfile: Dockerfile
+    container_name: v3-agent
+    restart: unless-stopped
+    ports:
+      - "${AGENT_PORT:-8001}:8001"
+    env_file:
+      - .env
+    environment:
+      AGENT_PORT: 8001
+    depends_on:
+      kb-service:
+        condition: service_started
+      litellm:
+        condition: service_started
+    networks:
+      - v3-net
+
+  lobe-chat:
+    build:
+      context: .
+      dockerfile: lobe-chat/Dockerfile
+    container_name: v3-lobe-chat
+    ports:
+      - "3210:3210"
+    environment:
+      OPENAI_API_KEY: sk-no-key-required
+      OPENAI_PROXY_URL: http://agent-service:8001/v1
+      DEFAULT_AGENT_CONFIG: model=mistral-nemo
+      FEATURE_FLAGS: "-welcome_suggest,-market,-dalle,-plugins,-knowledge_base,-speech_to_text,-ai_image,-changelog,-check_updates,-openai_api_key,-openai_proxy_url,-language_model_settings,-provider_settings"
+      SSRF_ALLOW_PRIVATE_IP_ADDRESS: "1"
+    depends_on:
+      - agent-service
+    networks:
+      - v3-net
+
+  bot-vk:
+    build:
+      context: ./bot-vk
+      dockerfile: Dockerfile
+    container_name: v3-bot-vk
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_CORE_URL: http://agent-service:8001
+    depends_on:
+      - agent-service
+    networks:
+      - v3-net
+
+  bot-max:
+    build:
+      context: ./bot-max
+      dockerfile: Dockerfile
+    container_name: v3-bot-max
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_CORE_URL: http://agent-service:8001
+    depends_on:
+      - agent-service
+    networks:
+      - v3-net
+
+volumes:
+  postgres_data:
+
+networks:
+  v3-net:
+    driver: bridge
