@@ -42,6 +42,7 @@ router = APIRouter(prefix="/qa", tags=["qa"])
 
 SEARCH_MODE = "naive"
 SEARCH_TOP_K_NO_RERANKER = 3
+MAX_CONTEXT_CHARS = 2500
 
 
 def _get_timeouts() -> dict:
@@ -61,6 +62,7 @@ def _format_search_context(
 
     Берёт ровно max_chunks первых чанков (ранжированных cfgA).
     Каждый чанк с URL помечается номером [источник N].
+    Общая длина контекста ограничена MAX_CONTEXT_CHARS символов.
 
     Args:
         data: Результат LightRAG aquery_data.
@@ -105,6 +107,17 @@ def _format_search_context(
         return "", {}
 
     context = "--- Найденная информация ---\n" + "\n---\n".join(chunk_texts)
+
+    if len(context) > MAX_CONTEXT_CHARS:
+        logger.info(
+            f"Context exceeds MAX_CONTEXT_CHARS ({len(context)} > {MAX_CONTEXT_CHARS}), "
+            f"truncating to {MAX_CONTEXT_CHARS} chars"
+        )
+        context = context[:MAX_CONTEXT_CHARS]
+        last_newline = context.rfind("\n")
+        if last_newline > 0:
+            context = context[:last_newline]
+
     return context, source_index
 
 def _extract_keywords_from_data(data: dict) -> dict:

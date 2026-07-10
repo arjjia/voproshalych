@@ -15,18 +15,20 @@ MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 NO_RETRY_STATUS_CODES = (400, 401, 403)
 
+# Cloudflare (стоящий перед api.mistral.ai) закрывает простаивающие
+# keepalive-соединения. requests.Session с пулом соединений приводит
+# к 33% таймаутов на переиспользованных сокетах.
+# Поэтому используем новый Session на каждый запрос (Connection: close).
+# Подробнее: docs/Deployment_workflow/srv-virtassist01.utmn.ru/network-ssl-report.md
+
 
 class MistralProvider(BaseLLMProvider):
-    """Провайдер Mistral AI.
-
-    Использует requests.Session для переиспользования соединений.
-    """
+    """Провайдер Mistral AI."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
         config = get_llm_config()
         self._api_key = api_key or config.mistral_api_key
         self._model = model or config.mistral_model
-        self._session = requests.Session()
 
     @property
     def name(self) -> str:
@@ -43,11 +45,12 @@ class MistralProvider(BaseLLMProvider):
             start_time = time.time()
 
             def _ping():
-                return self._session.post(
+                return requests.post(
                     MISTRAL_API_URL,
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
+                        "Connection": "close",
                     },
                     json={
                         "model": self._model,
@@ -72,12 +75,13 @@ class MistralProvider(BaseLLMProvider):
             return {"status": "error", "message": str(e), "latency_ms": 0, "error": str(e)}
 
     def _sync_generate(self, payload: dict, timeout: float) -> dict:
-        response = self._session.post(
+        response = requests.post(
             MISTRAL_API_URL,
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self._api_key}",
+                "Connection": "close",
             },
             json=payload,
             timeout=timeout,
