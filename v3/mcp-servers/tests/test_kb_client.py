@@ -10,12 +10,17 @@ async def test_qa_client_ask_success(httpx_mock):
     from src.kb.qa_client import QAServiceClient
 
     httpx_mock.add_response(
-        url="http://test:8004/qa",
+        url="http://test:8004/api/v1/tools",
         method="POST",
         json={
-            "answer": "Тестовый ответ.",
-            "source_links": [{"title": "Источник", "url": "https://example.com"}],
-            "question_type": 1,
+            "jsonrpc": "2.0",
+            "result": {
+                "context": "Тестовый ответ.",
+                "results": [
+                    {"source_url": "https://example.com", "title": "Источник", "score": 0.95},
+                ],
+            },
+            "id": 1,
         },
     )
 
@@ -33,9 +38,13 @@ async def test_qa_client_empty_answer(httpx_mock):
     from src.kb.qa_client import QAServiceClient
 
     httpx_mock.add_response(
-        url="http://test:8004/qa",
+        url="http://test:8004/api/v1/tools",
         method="POST",
-        json={"answer": ""},
+        json={
+            "jsonrpc": "2.0",
+            "result": {"context": "", "results": []},
+            "id": 1,
+        },
     )
 
     client = QAServiceClient("http://test:8004")
@@ -64,7 +73,7 @@ async def test_qa_client_http_error(httpx_mock):
     from src.kb.qa_client import QAServiceClient
 
     httpx_mock.add_response(
-        url="http://test:8004/qa",
+        url="http://test:8004/api/v1/tools",
         method="POST",
         status_code=503,
     )

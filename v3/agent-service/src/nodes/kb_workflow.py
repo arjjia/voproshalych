@@ -6,6 +6,7 @@ import logging
 from ..config import settings
 from ..models import AgentState
 from ..mcp_client import MCPClient
+from ..trace_logger import write_trace
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,12 @@ async def kb_workflow_node(state: AgentState) -> AgentState:
     query = state.messages[-1]["content"] if state.messages else ""
     logger.info(f"kb_workflow: query={query!r}")
 
+    await write_trace(
+        request_id=state.request_id, step=1, phase="acting",
+        action="kb_search",
+        action_input=json.dumps({"query": query[:200]}, ensure_ascii=False),
+    )
+
     try:
         mcp = MCPClient(settings.mcp_kb_url)
         kb_result = await mcp.call_tool("kb_search", {"query": query, "workspace": "public"})
@@ -35,6 +42,11 @@ async def kb_workflow_node(state: AgentState) -> AgentState:
         else:
             kb_answer = "Не удалось найти информацию."
 
+        await write_trace(
+            request_id=state.request_id, step=1, phase="evaluation",
+            observation=f"KB ответ получен, длина={len(kb_answer)}",
+        )
+
         llm_answer = await _generate_final_answer(query, kb_answer, state.dialog_context)
         state.final_answer = llm_answer
         state.sources = [{"title": "База знаний ТюмГУ", "url": ""}]
@@ -43,6 +55,12 @@ async def kb_workflow_node(state: AgentState) -> AgentState:
         logger.error(f"kb_workflow error: {e}")
         state.final_answer = f"Произошла ошибка при поиске: {e}"
         state.error = str(e)
+
+        await write_trace(
+            request_id=state.request_id, step=1, phase="evaluation",
+            action="error",
+            observation=f"Ошибка KB workflow: {e}",
+        )
 
     return state
 

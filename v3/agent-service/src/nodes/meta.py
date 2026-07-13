@@ -3,6 +3,7 @@
 import logging
 
 from ..models import AgentState
+from ..trace_logger import write_trace
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ async def meta_node(state: AgentState) -> AgentState:
     query = state.messages[-1]["content"].lower().strip() if state.messages else ""
 
     logger.info(f"meta: query={query!r}")
+
+    await write_trace(
+        request_id=state.request_id, step=1, phase="reasoning",
+        thought=f"Meta-запрос: {query[:200]}",
+    )
 
     if any(w in query for w in ["кто ты", "что ты", "ты кто", "расскажи о себе"]):
         state.final_answer = META_RESPONSES["who_are_you"]

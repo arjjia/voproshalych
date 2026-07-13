@@ -1,6 +1,6 @@
 """Модели данных agent-service."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -35,6 +35,8 @@ class AgentState:
     final_answer: str | None = None
     sources: list[dict[str, str]] | None = None
     error: str | None = None
+    profile: Profile = field(default_factory=Profile)
+    request_id: str = ""
 
 
 @dataclass

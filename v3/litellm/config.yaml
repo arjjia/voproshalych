@@ -4,25 +4,141 @@ general_settings:
   otel: false
 
 model_list:
-  - model_name: mistral-nemo
+  # ═══════════════════════════════════════════════
+  #  FREE — OpenCode Zen (основной упор)
+  # ═══════════════════════════════════════════════
+
+  - model_name: deepseek-v4-flash-free    # DeepSeek V4 Flash — быстрый универсал
+    litellm_params:
+      model: openai/deepseek-v4-flash-free
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: nemotron-ultra-free       # Nvidia Nemotron 3 Ultra 550B — reasoning
+    litellm_params:
+      model: openai/nemotron-3-ultra-free
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: hy3-free                  # Tencent HY3 — анализ, многоязычность
+    litellm_params:
+      model: openai/hy3-free
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: mimo-free                 # Xiaomi MiMo v2.5
+    litellm_params:
+      model: openai/mimo-v2.5-free
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: code-free                 # North Mini Code — программирование
+    litellm_params:
+      model: openai/north-mini-code-free
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: pickle-free               # Big Pickle — экспериментальная
+    litellm_params:
+      model: openai/big-pickle
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  FREE — OpenRouter (фолбэки, другой выбор)
+  # ═══════════════════════════════════════════════
+
+  - model_name: nemotron-super-or         # Nemotron 3 Super 120B (1M ctx)
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: llama-70b-or              # Llama 3.3 70B Instruct
+    litellm_params:
+      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: gpt-oss-or                # OpenAI GPT-OSS 120B
+    litellm_params:
+      model: openrouter/openai/gpt-oss-120b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: qwen-coder-or             # Qwen3 Coder (1M ctx)
+    litellm_params:
+      model: openrouter/qwen/qwen3-coder:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: gemma-31b-or              # Google Gemma 4 31B
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  LIGHT — платные, дешёвые
+  # ═══════════════════════════════════════════════
+
+  - model_name: glm-5.2                   # GLM 5.2 — основной лёгкий
+    litellm_params:
+      model: openai/glm-5.2
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  - model_name: mistral-nemo              # Mistral Nemo (через Mistral API)
     litellm_params:
       model: mistral/open-mistral-nemo
       api_key: os.environ/MISTRAL_API_KEY
       max_tokens: 4096
-      temperature: 0.7
     model_info:
-      mode: completion
-      cost_per_token: 0.0
+      mode: chat
 
-  - model_name: mistral-classifier
+  - model_name: mistral-classifier        # Mistral Nemo — дешёвая классификация
     litellm_params:
       model: mistral/open-mistral-nemo
       api_key: os.environ/MISTRAL_API_KEY
       max_tokens: 512
       temperature: 0.1
     model_info:
-      mode: completion
-      cost_per_token: 0.0
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  Embedding
+  # ═══════════════════════════════════════════════
 
   - model_name: mistral-embed
     litellm_params:
@@ -30,8 +146,22 @@ model_list:
       api_key: os.environ/MISTRAL_API_KEY
     model_info:
       mode: embedding
-      cost_per_token: 0.0
 
+# ═══════════════════════════════════════════════════
+#  Fallback chains — если primary падает, идём дальше
+# ═══════════════════════════════════════════════════
+
+fallbacks:
+  # Free → Free → Free
+  - deepseek-v4-flash-free: [nemotron-ultra-free, hy3-free, llama-70b-or]
+  - nemotron-ultra-free: [deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or]
+  - hy3-free: [deepseek-v4-flash-free, nemotron-ultra-free, llama-70b-or]
+  - mimo-free: [deepseek-v4-flash-free, hy3-free, gemma-31b-or]
+  - code-free: [qwen-coder-or, deepseek-v4-flash-free, nemotron-ultra-free]
+  - pickle-free: [deepseek-v4-flash-free, nemotron-ultra-free]
+  # Light → Free fallback
+  - glm-5.2: [deepseek-v4-flash-free, mistral-nemo, nemotron-ultra-free]
+  - mistral-nemo: [deepseek-v4-flash-free, glm-5.2, nemotron-ultra-free]
 
 litellm_settings:
   drop_params: true
@@ -42,3 +172,9 @@ litellm_settings:
     host: redis
     port: 6379
     ttl: 3600
+
+router_settings:
+  routing_strategy: "latency-based-routing"
+  enable_pre_call_checks: false
+  num_retries: 2
+  allowed_fails: 3

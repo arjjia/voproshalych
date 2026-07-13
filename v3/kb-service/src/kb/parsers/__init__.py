@@ -7,6 +7,7 @@ from .sveden import SvedenParser
 from .utmn import UtmnParser
 from .utmn_contacts import UtmnContactsParser
 from .utmn_faq import UtmnFaqParser
+from .utmn_news import UtmnNewsParser
 from .web import WebPageParser
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "UtmnParser",
     "UtmnContactsParser",
     "UtmnFaqParser",
+    "UtmnNewsParser",
     "WebPageParser",
 ]

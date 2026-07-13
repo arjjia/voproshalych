@@ -66,7 +66,14 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-master-key-v3}
       LITELLM_CONFIG_FILE: /app/config.yaml
       DATABASE_URL: postgresql://voproshalych:voproshalych@postgres:5432/voproshalych
-    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    extra_hosts:
+      - "opencode.ai:172.65.90.21"
+      - "openrouter.ai:104.18.3.115"
+      - "api.mistral.ai:172.66.2.203"
     depends_on:
       redis:
         condition: service_healthy
@@ -179,6 +186,22 @@ services:
     networks:
       - v3-net
 
+  mcp-fetch:
+    build:
+      context: ./mcp-servers
+      dockerfile: Dockerfile.public
+    container_name: v3-mcp-fetch
+    restart: unless-stopped
+    ports:
+      - "${MCP_FETCH_PORT:-9015}:9015"
+    env_file:
+      - .env
+    environment:
+      MCP_SERVER_TYPE: fetch
+      MCP_PORT: 9015
+    networks:
+      - v3-net
+
   agent-service:
     build:
       context: ./agent-service
@@ -191,6 +214,10 @@ services:
       - .env
     environment:
       AGENT_PORT: 8001
+      LLM_API_BASE: http://litellm:4000/v1
+      LLM_API_KEY: ${LITELLM_MASTER_KEY}
+      LLM_MODEL: deepseek-v4-flash-free
+      LLM_FALLBACK_MODEL: glm-5.2
     depends_on:
       kb-service:
         condition: service_started
@@ -201,19 +228,34 @@ services:
 
   lobe-chat:
     build:
-      context: .
-      dockerfile: lobe-chat/Dockerfile
+      context: ../../
+      dockerfile: voproshalych_v2/v3/lobe-chat/Dockerfile
     container_name: v3-lobe-chat
     ports:
       - "3210:3210"
+    env_file:
+      - .env
     environment:
+      APP_URL: ${APP_URL:-http://localhost:3210}
       OPENAI_API_KEY: sk-no-key-required
       OPENAI_PROXY_URL: http://agent-service:8001/v1
-      DEFAULT_AGENT_CONFIG: model=mistral-nemo
-      FEATURE_FLAGS: "-welcome_suggest,-market,-dalle,-plugins,-knowledge_base,-speech_to_text,-ai_image,-changelog,-check_updates,-openai_api_key,-openai_proxy_url,-language_model_settings,-provider_settings"
+      DEFAULT_AGENT_CONFIG: model=deepseek-v4-flash-free
+      FEATURE_FLAGS: "-welcome_suggest,-market,-dalle,-plugins,-knowledge_base,-speech_to_text,-ai_image,-changelog,-check_updates,-openai_api_key,-openai_proxy_url,-language_model_settings,-provider_settings,-create_session,-edit_agent,-import,-export,-share,-discover"
       SSRF_ALLOW_PRIVATE_IP_ADDRESS: "1"
+      ENABLED_OPENAI: "0"
+      ENABLED_OLLAMA: "0"
+      KEY_VAULTS_SECRET: ${KEY_VAULTS_SECRET:-changeme-dev-secret-v3}
+      DATABASE_DRIVER: node
+      DATABASE_URL: postgresql://${POSTGRES_USER:-voproshalych}:${POSTGRES_PASSWORD:-voproshalych}@postgres:5432/${POSTGRES_DB:-voproshalych}
+      AUTH_SECRET: ${AUTH_SECRET:-changeme-auth-secret-v3}
+      AUTH_SSO_PROVIDERS: ""
+      AUTH_DISABLE_EMAIL_PASSWORD: "0"
+      AUTH_EMAIL_VERIFICATION: "0"
+      AUTH_ENABLE_MAGIC_LINK: "0"
+      CUSTOM_JS_URL: /custom.js
     depends_on:
       - agent-service
+      - postgres
     networks:
       - v3-net
 

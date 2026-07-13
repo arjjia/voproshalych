@@ -7,6 +7,7 @@
 - POST /v1/chat/completions — чат (OpenAI-совместимый)
 - GET  /health — healthcheck
 - GET  /mcp/tools — список доступных инструментов
+- GET  /trace — получить трассировку по request_id
 """
 
 import logging
@@ -14,16 +15,18 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from .config import settings
 from .graph import build_graph
-from .models import AgentState, Intent
+from .middleware import UserIdentityMiddleware
+from .models import AgentState, Intent, Profile
 from .mcp_client import MCPClient
 from .streaming import stream_agent_events
+from .trace_logger import get_traces
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,19 +69,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(UserIdentityMiddleware)
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     """Основной эндпоинт чата."""
     logger.info(f"chat: query={req.query!r}, user={req.user_id}, role={req.role}")
 
     if not req.query or not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    profile = Profile(
+        user_id=req.user_id or getattr(request.state, "user_id", "anonymous"),
+        role=req.role or getattr(request.state, "role", "guest"),
+    )
+
     state = AgentState(
         messages=[{"role": "user", "content": req.query}],
         dialog_context=req.dialog_context,
+        profile=profile,
+        request_id=request_id,
     )
 
     try:
@@ -116,15 +128,28 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 @app.get("/chat/stream")
-async def chat_stream(query: str, user_id: str = "anonymous", role: str = "guest"):
+async def chat_stream(
+    query: str,
+    user_id: str = "anonymous",
+    role: str = "guest",
+    request: Request = None,
+):
     """Стриминг ответа агента через SSE."""
     logger.info(f"chat_stream: query={query!r}, user={user_id}")
 
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4())) if request else str(uuid.uuid4())
+    profile = Profile(
+        user_id=user_id or getattr(request.state, "user_id", "anonymous") if request else user_id,
+        role=role or getattr(request.state, "role", "guest") if request else role,
+    )
+
     state = AgentState(
         messages=[{"role": "user", "content": query}],
+        profile=profile,
+        request_id=request_id,
     )
 
     try:
@@ -200,7 +225,9 @@ async def openai_embeddings(request: Request):
 
     body = await request.json()
     payload = {
-        "model": body.get("model", settings.embedding_model or "mistral-embed"),
+        # agent-service только проксирует /v1/embeddings к LiteLLM (где живёт mistral-embed).
+        # Эмбеддинги для базы знаний kb-service делает локально (deepvk/USER-bge-m3), см. kb-service.
+        "model": body.get("model", "mistral-embed"),
         "input": body["input"],
     }
 
@@ -249,6 +276,7 @@ async def openai_chat_completions(req: OpenAIRequest):
     state = AgentState(
         messages=[{"role": "user", "content": query}],
         dialog_context=dialog_context,
+        request_id=str(uuid.uuid4()),
     )
 
     try:
@@ -330,6 +358,13 @@ async def health():
     return {"status": "ok", "service": "agent-service", "version": "0.1.0"}
 
 
+@app.get("/trace")
+async def trace_get(request_id: str = Query(..., description="Request ID from X-Request-Id header")):
+    """Получить трассировку выполнения агента по request_id."""
+    traces = await get_traces(request_id)
+    return {"request_id": request_id, "traces": traces}
+
+
 @app.get("/mcp/tools")
 async def list_available_tools():
     """Возвращает список инструментов, доступных агенту."""
@@ -340,6 +375,7 @@ async def list_available_tools():
             {"name": "mcp-contacts", "url": settings.mcp_contacts_url, "tools": ["search_contacts"]},
             {"name": "mcp-library", "url": settings.mcp_library_url, "tools": ["get_library_info", "get_library_services", "get_library_guides"]},
             {"name": "mcp-sveden", "url": settings.mcp_sveden_url, "tools": ["get_sveden_info", "get_structure", "get_management"]},
+            {"name": "mcp-fetch", "url": settings.mcp_fetch_url, "tools": ["fetch_url"]},
         ]
     }
 

@@ -25,13 +25,13 @@ class TestSupervisorRouter:
         result = router(state)
         assert result == expected_node
 
-    def test_router_off_topic_goes_to_end(self):
-        """Off-topic запросы идут в END."""
+    def test_router_off_topic_goes_to_off_topic_node(self):
+        """Off-topic запросы идут в узел off_topic (который затем ведёт в END)."""
         from src.graph import router
 
         state = AgentState(messages=[], intent=Intent.OFF_TOPIC)
         result = router(state)
-        assert result == "end"
+        assert result == "off_topic"
 
     def test_router_none_intent_goes_to_end(self):
         """Если интент не определён — END."""

@@ -96,6 +96,27 @@ def _get_tools_definition():
                 "inputSchema": {"type": "object", "properties": {}},
             },
         ]
+    elif server_type == "fetch":
+        return [
+            {
+                "name": "fetch_url",
+                "description": "Загрузить содержимое веб-страницы по URL. "
+                "Возвращает очищенный текст страницы. "
+                "Полезно, когда пользователь ссылается на конкретную страницу.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "URL страницы для загрузки"},
+                        "max_length": {
+                            "type": "integer",
+                            "description": "Максимальная длина текста (500-50000)",
+                            "default": 8000,
+                        },
+                    },
+                    "required": ["url"],
+                },
+            },
+        ]
     return []
 
 
@@ -163,6 +184,17 @@ async def _call_tool_impl(name: str, args: dict, req_id: int) -> dict:
                 text = await get_structure()
             elif name == "get_management":
                 text = await get_management()
+            else:
+                text = f"Unknown tool: {name}"
+
+        elif server_type == "fetch":
+            from .fetch_server import fetch_url
+
+            if name == "fetch_url":
+                text = await fetch_url(
+                    url=args.get("url", ""),
+                    max_length=args.get("max_length", 8000),
+                )
             else:
                 text = f"Unknown tool: {name}"
 

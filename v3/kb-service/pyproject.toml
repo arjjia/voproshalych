@@ -17,4 +17,25 @@ dependencies = [
     "pytesseract>=0.3",
     "Pillow>=10.0",
     "python-multipart>=0.0",
+    "numpy>=2.0.0",
+    "sentence-transformers>=3.0.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"
+pythonpath = ["src"]

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     kb_port: int = 8004
     litellm_url: str = "http://litellm:4000"
     litellm_master_key: str = "sk-litellm-master-key-v3"
-    embedding_model: str = "mistral-embed"
+    embedding_model: str = "deepvk/USER-bge-m3"
     chunk_size: int = 300
     chunk_overlap: int = 30
     top_k: int = 10

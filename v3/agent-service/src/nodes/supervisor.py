@@ -9,6 +9,7 @@ import logging
 
 from ..config import settings
 from ..models import AgentState, Complexity, Intent
+from ..trace_logger import write_trace
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,11 @@ async def supervisor_node(state: AgentState) -> AgentState:
 
     dialog_context_block = f"История диалога:\n{state.dialog_context[:500]}\n\n" if state.dialog_context else ""
 
+    await write_trace(
+        request_id=state.request_id, step=0, phase="reasoning",
+        thought=f"Классифицирую запрос: {query[:200]}",
+    )
+
     try:
         prompt = SYSTEM_PROMPT.format(
             query=query[:500],
@@ -57,10 +63,21 @@ async def supervisor_node(state: AgentState) -> AgentState:
 
         logger.info(f"supervisor: intent={state.intent.value}, complexity={state.complexity.value}")
 
+        await write_trace(
+            request_id=state.request_id, step=0, phase="evaluation",
+            thought=f"Определён интент: {intent_str}, сложность: {complexity_str}",
+        )
+
     except Exception as e:
         logger.error(f"supervisor error: {e}")
         state.intent = Intent.KB_QA
         state.complexity = Complexity.SIMPLE
+
+        await write_trace(
+            request_id=state.request_id, step=0, phase="evaluation",
+            action="fallback",
+            observation=f"Ошибка классификации: {e}, использую KB_QA по умолчанию",
+        )
 
     return state
 

@@ -13,6 +13,7 @@ from .nodes.supervisor import supervisor_node
 from .nodes.kb_workflow import kb_workflow_node
 from .nodes.meta import meta_node
 from .nodes.react import react_node
+from .trace_logger import write_trace
 
 logger = logging.getLogger(__name__)
 

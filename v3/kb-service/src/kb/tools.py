@@ -17,6 +17,7 @@ from kb.parsers import (
     SvedenParser,
     UtmnContactsParser,
     UtmnFaqParser,
+    UtmnNewsParser,
     UtmnParser,
     WebPageParser,
 )
@@ -399,6 +400,38 @@ async def crawl_utmn_contacts(source_url: str) -> dict:
     }
 
 
+async def crawl_utmn_news(
+    source_url: str = "https://www.utmn.ru/news/stories/",
+    max_pages: int = 3,
+) -> dict:
+    """Crawl новостей utmn.ru (stories) и сохранить в БЗ."""
+    parser = UtmnNewsParser(kind="news")
+    docs = await parser.get_documents(source_url, max_pages=max_pages)
+    results = [await _store_parsed_document(doc) for doc in docs]
+    return {
+        "status": "ok",
+        "total": len(results),
+        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "results": results,
+    }
+
+
+async def crawl_utmn_events(
+    source_url: str = "https://www.utmn.ru/news/events/",
+    max_pages: int = 3,
+) -> dict:
+    """Crawl мероприятий utmn.ru (events) и сохранить в БЗ."""
+    parser = UtmnNewsParser(kind="events")
+    docs = await parser.get_documents(source_url, max_pages=max_pages)
+    results = [await _store_parsed_document(doc) for doc in docs]
+    return {
+        "status": "ok",
+        "total": len(results),
+        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "results": results,
+    }
+
+
 TOOL_FUNCTIONS = {
     "kb_search": kb_search,
     "classify_query": classify_query,
@@ -410,6 +443,8 @@ TOOL_FUNCTIONS = {
     "crawl_confluence_study": crawl_confluence_study,
     "crawl_utmn_faq": crawl_utmn_faq,
     "crawl_utmn_contacts": crawl_utmn_contacts,
+    "crawl_utmn_news": crawl_utmn_news,
+    "crawl_utmn_events": crawl_utmn_events,
 }
 
 

@@ -1,103 +1,158 @@
 # Voproshalych v3 — Агент-ассистент ТюмГУ
 
-Автономный AI-ассистент с собственной базой знаний, LangGraph-оркестратором и современным чат-интерфейсом.
+Автономный AI-ассистент Тюменского государственного университета с собственной базой знаний,
+LangGraph-оркестратором, MCP-инструментарием и кастомным чат-интерфейсом (LobeChat fork).
 
 ## Архитектура
 
 ```mermaid
+%%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
 graph TB
-    User["Пользователь"] --> LobeChat["LobeChat (:3210)"]
-    LobeChat -->|v1/chat/completions| Agent["Agent Service (:8001)"]
+    User(["Пользователь"]) --> LobeChat["LobeChat v3 (:3210)<br/>Кастомный fork<br/>#00aeef брендинг"]
 
-    subgraph Agent["Agent Service (:8001)"]
-        direction TB
-        API["FastAPI<br/>OpenAI API / Chat / Health"]
-        Graph["LangGraph граф<br/>Supervisor → KB / Meta / ReAct / Clarify / OffTopic"]
-        MCP["MCP-клиент"]
-        API --> Graph
-        API --> MCP
+    subgraph AgentService["Agent Service (:8001)"]
+        FastAPI["FastAPI<br/>v1/chat/completions /chat /health<br/>/trace /mcp/tools"]
+        MW["UserIdentityMiddleware<br/>X-User-Id / X-User-Role"]
+        LangGraph["LangGraph граф<br/>Supervisor → KB / Meta / ReAct / Clarify / OffTopic"]
+        Traces["trace_logger<br/>JSON Lines /tmp/agent-traces"]
+        MCPClient["MCP-клиент<br/>HTTP JSON-RPC"]
+
+        FastAPI --> MW
+        MW --> LangGraph
+        MW --> Traces
+        FastAPI --> MCPClient
     end
 
     subgraph LLM["LiteLLM Gateway (:4000)"]
-        LiteLLM["LiteLLM Proxy"]
-        LiteLLM --> Nemo["mistral-nemo"]
-        LiteLLM --> Classifier["mistral-classifier"]
-        LiteLLM --> Embed["mistral-embed"]
+        LiteLLM["LiteLLM Proxy<br/>~15 моделей"]
+        Primary["deepseek-v4-flash-free<br/>Основная"]
+        Fallback["nemotron-ultra-free<br/>glm-5.2<br/>llama-70b-or<br/>+ 10 fallback"]
+        Classifier["nemotron-ultra-free<br/>Классификация t=0.1"]
+        Embed["mistral-embed<br/>Эмбеддинги dim=1024"]
+        RedisCache["Redis Cache<br/>TTL: 3600с"]
+
+        LiteLLM --> Primary
+        LiteLLM --> Fallback
+        LiteLLM --> Classifier
+        LiteLLM --> Embed
+        LiteLLM --> RedisCache
     end
 
     subgraph KB["База знаний"]
-        KBS["kb-service (:8005)<br/>JSON-RPC"]
-        PG["PostgreSQL + pgvector"]
+        KBS["kb-service (:8005)<br/>FastAPI JSON-RPC"]
+        PG["PostgreSQL + pgvector<br/>Chunks → Embeddings dim=1024"]
+        LocalEmbed["SentenceTransformer<br/>deepvk/USER-bge-m3<br/>Локально, dim=1024"]
+        Parsers["Парсеры<br/>Web / Utmn / News / Confluence<br/>Sveden / FAQ / Contacts"]
+
+        KBS --> LocalEmbed
         KBS --> PG
+        KBS --> Parsers
     end
 
     subgraph MCP["MCP-серверы"]
-        MCPKB["mcp-kb (:9010)"]
-        MCPNews["mcp-news (:9011)"]
-        MCPContacts["mcp-contacts (:9012)"]
-        MCPLib["mcp-library (:9013)"]
-        MCPSv["mcp-sveden (:9014)"]
+        MCPKB["mcp-kb (:9010)<br/>Bridge → kb-service"]
+        MCPNews["mcp-news (:9011)<br/>Новости/события"]
+        MCPFetch["mcp-fetch (:9015)<br/>fetch_url (HTML→text)"]
+        MCPContacts["mcp-contacts (:9012)<br/>Контакты"]
+        MCPLib["mcp-library (:9013)<br/>Библиотека"]
+        MCPSv["mcp-sveden (:9014)<br/>Сведения об организации"]
     end
 
     subgraph Ext["Внешние источники"]
-        UTMN["utmn.ru"]
-        SVEDEN["sveden.utmn.ru"]
-        CONFL["Confluence"]
+        UTMN_NEWS["utmn.ru/news/stories<br/>Новости"]
+        UTMN_EVENTS["utmn.ru/news/events<br/>События"]
+        UTMN_CONTACTS["utmn.ru/kontakty<br/>Контакты"]
+        BMK["bmk.utmn.ru<br/>lib.utmn.ru<br/>Библиотека"]
+        SVEDEN["sveden.utmn.ru<br/>Сведения"]
+        CONFL["Confluence<br/>Help + Study"]
     end
 
-    Graph -.->|LLM вызовы| LiteLLM
-    MCP --> MCPKB & MCPNews & MCPContacts & MCPLib & MCPSv
+    subgraph Bots["Боты"]
+        VKBot["bot-vk<br/>ВКонтакте"]
+        MaxBot["bot-max<br/>Max (OnlinePatrol)"]
+    end
+
+    subgraph Infra["Инфраструктура"]
+        REDIS["Redis 7 (:6380)"]
+        PGSQL["PostgreSQL (:5433)<br/>pgvector + AGE<br/>Alembic migrations"]
+    end
+
+    LobeChat -->|OpenAI API| FastAPI
+    LobeChat -->|POSTGRES| PGSQL
+
+    Bots -->|HTTP| FastAPI
+
+    LangGraph -.->|LLM| LiteLLM
+    MCPClient --> MCPKB & MCPNews & MCPFetch & MCPContacts & MCPLib & MCPSv
     MCPKB -->|JSON-RPC| KBS
-    MCPNews --> UTMN
-    MCPContacts --> UTMN
-    MCPLib --> UTMN
+    MCPNews --> UTMN_NEWS
+    MCPNews --> UTMN_EVENTS
+    MCPFetch -->|HTTP| UTMN_NEWS & UTMN_EVENTS
+    MCPContacts --> UTMN_CONTACTS
+    MCPLib --> BMK
     MCPSv --> SVEDEN
-    LiteLLM --> Redis["Redis (:6380)"]
-    LiteLLM --> PG
+    KBS --> CONFL
+    KBS -->|pgvector| PGSQL
+    LiteLLM -->|cache| REDIS
+    LiteLLM -->|usage| PGSQL
 ```
 
 ### Компоненты
 
 | Компонент | Технология | Порт | Описание |
 |-----------|-----------|------|----------|
-| **LobeChat** | lobehub/lobe-chat | 3210 | Современный ChatGPT-like интерфейс |
-| **agent-service** | FastAPI + LangGraph | 8001 | Оркестратор: классификация, маршрутизация, MCP-инструменты |
-| **LiteLLM Gateway** | LiteLLM Proxy | 4000 | Прокси к Mistral API (3 модели + Redis-кэш) |
-| **kb-service** | FastAPI + SQLAlchemy | 8005 | База знаний: парсинг, чанкинг, эмбеддинги, pgvector-поиск |
-| **mcp-kb** | Python FastAPI | 9010 | Bridge к kb-service через JSON-RPC |
-| **mcp-news** | Python FastMCP | 9011 | Парсинг новостей с utmn.ru |
+| **LobeChat v3** | lobehub/lobe-chat (fork) | 3210 | Кастомный чат-интерфейс: pixel cat логотип, #00aeef, consent screen, auth email+password |
+| **agent-service** | FastAPI + LangGraph | 8001 | Оркестратор: классификация, маршрутизация, MCP-инструменты, трассировка |
+| **LiteLLM Gateway** | LiteLLM Proxy | 4000 | Прокси к ~15 LLM (OpenCode Zen + OpenRouter + Mistral) с fallback цепочками |
+| **kb-service** | FastAPI + SQLAlchemy | 8005 | База знаний: парсинг, чанкинг, локальные эмбеддинги (deepvk/USER-bge-m3), pgvector-поиск |
+| **mcp-kb** | Python FastMCP | 9010 | Bridge к kb-service через JSON-RPC |
+| **mcp-news** | Python FastMCP | 9011 | Парсинг новостей и событий с utmn.ru |
+| **mcp-fetch** | Python FastMCP | 9015 | Универсальный загрузчик URL (HTML → чистый текст) |
 | **mcp-contacts** | Python FastMCP | 9012 | Парсинг контактов utmn.ru |
 | **mcp-library** | Python FastMCP | 9013 | Информация о библиотеке (bmk.utmn.ru) |
 | **mcp-sveden** | Python FastMCP | 9014 | Сведения об организации (sveden.utmn.ru) |
-| **PostgreSQL** | PostgreSQL + pgvector + AGE | 5433 | Основная БД с векторным поиском |
+| **bot-vk** | Python | — | Бот для ВКонтакте |
+| **bot-max** | Python | — | Бот для Max (OnlinePatrol) |
+| **PostgreSQL** | PostgreSQL + pgvector + AGE | 5433 | Основная БД: документы, эмбеддинги, пользователи LobeChat |
 | **Redis** | Redis 7 | 6380 | Кэш LiteLLM |
 
 ### Интенты (LangGraph)
 
 ```
-start → dialog_context → supervisor (классификация)
-          ├─ kb_qa          → kb_workflow → end
-          ├─ meta           → meta        → end
-          ├─ tool_required  → react       → end
-          ├─ clarify        → clarify     → end
-          └─ off_topic      → off_topic   → end
+start → supervisor (классификация интента через LLM)
+          ├─ kb_qa          → kb_workflow (поиск по БЗ → LLM ответ)
+          ├─ meta           → meta (ответ про ассистента)
+          ├─ tool_required  → react (multi-tool агент через MCP)
+          ├─ clarify        → clarify (уточнение запроса)
+          └─ off_topic      → off_topic (вежливый отказ)
 ```
 
 | Интент | Описание |
 |--------|----------|
 | `kb_qa` | Вопрос про университет (правила, стипендии, факультеты...) |
 | `meta` | Вопрос про самого ассистента |
-| `tool_required` | Запрос, требующий MCP-инструментов (новости, контакты...) |
+| `tool_required` | Запрос, требующий MCP-инструментов (новости, контакты, библиотека...) |
 | `clarify` | Неясный запрос — просим уточнить |
 | `off_topic` | Не по теме — вежливый отказ |
 
-### LiteLLM модели
+### LLM-модели (LiteLLM)
 
-| Имя | Системная модель | Назначение |
-|-----|-----------------|------------|
-| `mistral-nemo` | `mistral/open-mistral-nemo` | Основной ответ (t=0.7, max_tokens=4096) |
-| `mistral-classifier` | `mistral/open-mistral-nemo` | Классификация (t=0.1, max_tokens=512) |
-| `mistral-embed` | `mistral/mistral-embed` | Эмбеддинги для pgvector (dim=1024) |
+Основная модель — **deepseek-v4-flash-free** (OpenCode Zen, бесплатно). При недоступности — автоматический fallback
+через 15 моделей (OpenRouter free, Mistral Nemo, GLM 5.2). Классификация — nemotron-ultra-free.
+Эмбеддинги: локально deepvk/USER-bge-m3 (dim=1024) в kb-service, mistral-embed (dim=1024) через LiteLLM для API.
+
+### Аутентификация (LobeHub Server-mode + Better Auth)
+
+- Регистрация по email+password (открытая, без подтверждения)
+- AUTH_SECRET + KEY_VAULTS_SECRET в docker-compose
+- Данные пользователей хранятся в PostgreSQL (таблицы Better Auth)
+- X-User-Id / X-User-Role пробрасываются через middleware → Profile в AgentState
+
+### Трассировка
+
+- Каждый запрос получает `X-Request-Id` (UUID)
+- Все узлы графа пишут `trace_logger.write_trace()` в JSON Lines файлы (`/tmp/agent-traces/traces-YYYYMMDD.jsonl`)
+- Получить трассировку: `GET /trace?request_id=<uuid>`
 
 ## Быстрый старт
 
@@ -105,8 +160,7 @@ start → dialog_context → supervisor (классификация)
 
 ```bash
 cd Submodules/voproshalych_v2/v3
-# .env уже есть — проверить MISTRAL_API_KEY
-# При необходимости скопировать из docs/Environment/v2_local/.env
+# Создать .env (пример в docs/Environment/v2_local/.env)
 ```
 
 ### 2. Запуск всех сервисов
@@ -121,10 +175,9 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Ждать готовности:
+Health checks:
 
 ```bash
-# Проверить health всех сервисов
 curl http://localhost:8001/health
 # → {"status":"ok","service":"agent-service","version":"0.1.0"}
 
@@ -137,20 +190,23 @@ curl http://localhost:4000/health/readiness
 
 ### 3. Заполнение базы знаний
 
-После запуска PostgreSQL и kb-service нужно наполнить базу знаний.
-
 **Стандартные источники** (работают из Docker):
 
 ```bash
-# Краулинг utmn.ru
+# Краулинг utmn.ru (основные страницы)
 curl -X POST http://localhost:8005/api/v1/tools \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"crawl_utmn","params":{"base_url":"https://www.utmn.ru"},"id":1}'
 
-# Краулинг sveden.utmn.ru
+# Краулинг новостей
 curl -X POST http://localhost:8005/api/v1/tools \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"crawl_sveden","params":{},"id":1}'
+  -d '{"jsonrpc":"2.0","method":"crawl_utmn_news","params":{},"id":1}'
+
+# Краулинг событий
+curl -X POST http://localhost:8005/api/v1/tools \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"crawl_utmn_events","params":{},"id":1}'
 
 # Краулинг FAQ
 curl -X POST http://localhost:8005/api/v1/tools \
@@ -163,20 +219,12 @@ curl -X POST http://localhost:8005/api/v1/tools \
   -d '{"jsonrpc":"2.0","method":"crawl_utmn_contacts","params":{"source_url":"https://www.utmn.ru/kontakty"},"id":1}'
 ```
 
-**Confluence** (Vouch SSO блокирует запросы из Docker на macOS — запускать с хоста, где есть VPN):
+**Confluence** (запускать с хоста):
 
 ```bash
 uv run --no-project python3 scripts/crawl_confluence.py                # все пространства
 uv run --no-project python3 scripts/crawl_confluence.py --source study  # только Study
 uv run --no-project python3 scripts/crawl_confluence.py --source help   # только Help
-```
-
-**Отдельный документ по URL:**
-
-```bash
-curl -X POST http://localhost:8005/api/v1/tools \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"store_document","params":{"url":"https://www.utmn.ru/some-page","source_type":"web"},"id":1}'
 ```
 
 **Проверить поиск:**
@@ -187,31 +235,30 @@ curl -X POST http://localhost:8005/api/v1/tools \
   -d '{"jsonrpc":"2.0","method":"kb_search","params":{"query":"какие стипендии в тюмгу","top_k":5},"id":1}'
 ```
 
-### 4. Запуск веб-интерфейса (LobeChat)
-
-После запуска всех сервисов LobeChat доступен по адресу:
+### 4. Веб-интерфейс (LobeChat)
 
 ```
 http://localhost:3210
 ```
 
-Модель `mistral-nemo` подхватывается автоматически через OpenAI-совместимый API agent-service.
+При первом входе — consent screen (согласие на обработку данных).
+Регистрация по email+password. После входа доступен чат с ассистентом.
 
-Проверить, что API работает:
+### 5. API (OpenAI-совместимый)
 
 ```bash
 # Список моделей
 curl http://localhost:8001/v1/models
 
-# Чат через OpenAI-совместимый эндпоинт
+# Чат
 curl -X POST http://localhost:8001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "mistral-nemo",
+    "model": "deepseek-v4-flash-free",
     "messages": [{"role": "user", "content": "какие стипендии в тюмгу"}]
   }'
 
-# Эмбеддинги
+# Эмбеддинги (через LiteLLM)
 curl -X POST http://localhost:8001/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"model":"mistral-embed","input":"Тюменский государственный университет"}'
@@ -236,51 +283,92 @@ docker compose down
 docker compose down -v
 ```
 
-## Структура
+## Структура проекта
 
 ```
 v3/
-├── docker-compose.yml          # Единый Compose (все сервисы + LobeChat + боты)
 ├── .env                        # Переменные окружения
+├── docker-compose.yml          # Единый Compose (16 сервисов)
 ├── Makefile
-├── db/
+│
+├── kb-service/                 # База знаний
+│   ├── Dockerfile              # python:3.12-slim-bookworm
+│   └── src/kb/
+│       ├── main.py             # FastAPI JSON-RPC
+│       ├── config.py
+│       ├── models.py           # KBChunk, KBEmbedding ORM
+│       ├── db.py               # SQLAlchemy async engine
+│       ├── embedding.py        # deepvk/USER-bge-m3 (SentenceTransformer)
+│       ├── chunking.py         # Sentence-aware chunking
+│       ├── search.py           # pgvector similarity search
+│       ├── preprocessing.py
+│       ├── tools.py            # crawl, search, store
+│       └── parsers/            # web, utmn, news, faq, contacts,
+│                               # sveden, confluence_help, confluence_study
+│
+├── agent-service/              # Оркестратор
+│   ├── Dockerfile
+│   └── src/
+│       ├── main.py             # FastAPI + OpenAI API + /chat + /trace
+│       ├── config.py           # MCP URLs, LLM params
+│       ├── models.py           # AgentState, Intent, Complexity, Profile
+│       ├── graph.py            # LangGraph: 5 узлов + supervisor
+│       ├── middleware.py       # UserIdentityMiddleware
+│       ├── trace_logger.py     # JSON Lines трассировка
+│       ├── mcp_client.py      # HTTP JSON-RPC клиент
+│       ├── streaming.py       # SSE стриминг
+│       └── nodes/
+│           ├── supervisor.py   # Классификация интентов
+│           ├── kb_workflow.py  # Поиск по БЗ + LLM генерация
+│           ├── meta.py         # Об ассистенте
+│           └── react.py        # Multi-tool (MCP) агент
+│
+├── mcp-servers/                # MCP-серверы
+│   ├── Dockerfile.kb           # mcp-kb bridge
+│   ├── Dockerfile.public       # Все публичные MCP
+│   └── src/
+│       ├── kb/
+│       │   ├── server.py       # mcp-kb: tools/list, tools/call
+│       │   └── qa_client.py    # HTTP-клиент kb-service
+│       └── public/
+│           ├── server.py       # Диспетчер server_type
+│           ├── news_server.py  # Новости + события
+│           ├── fetch_server.py # fetch_url (HTML→text)
+│           ├── contacts_server.py
+│           ├── library_server.py
+│           └── sveden_server.py
+│
+├── lobe-chat/                  # Кастомный LobeChat fork
+│   ├── Dockerfile              # Многостадийная сборка + assets
+│   ├── custom.js               # #00aeef брендинг, скрытие UI
+│   └── consent.html            # Экран согласия на обработку данных
+│
+├── assets/                     # Брендовые ресурсы
+│   ├── logo.svg                # Pixel cat логотип (горизонтальный)
+│   ├── logo-icon.svg           # Pixel cat иконка
+│   ├── icon-192x192.png
+│   ├── icon-192x192.maskable.png
+│   ├── icon-512x512.png
+│   └── icon-512x512.maskable.png
+│
+├── db/                         # База данных
+│   ├── Dockerfile              # Alembic миграции
+│   ├── alembic.ini
+│   ├── migration/
 │   └── postgres/
 │       ├── Dockerfile          # PostgreSQL + pgvector + AGE
 │       └── init.sql
-├── kb-service/
-│   ├── Dockerfile
-│   ├── src/kb/
-│   │   ├── main.py             # FastAPI JSON-RPC
-│   │   ├── config.py           # Pydantic Settings
-│   │   ├── models.py           # KBChunk, KBEmbedding ORM
-│   │   ├── db.py               # SQLAlchemy async engine
-│   │   ├── embedding.py        # Эмбеддинги через LiteLLM
-│   │   ├── chunking.py         # Sentence-aware chunking
-│   │   ├── search.py           # pgvector similarity search
-│   │   ├── preprocessing.py    # Классификация запросов
-│   │   ├── tools.py            # Инструменты: crawl, search, store
-│   │   └── parsers/            # Парсеры источников
-├── agent-service/
-│   ├── Dockerfile
-│   ├── src/
-│   │   ├── main.py             # FastAPI + OpenAI API + chat
-│   │   ├── config.py
-│   │   ├── models.py           # AgentState, Intent, dialog_context
-│   │   ├── graph.py            # LangGraph граф
-│   │   ├── mcp_client.py       # MCP-клиент JSON-RPC
-│   │   └── nodes/
-├── mcp-servers/
-│   ├── Dockerfile.kb
-│   ├── Dockerfile.public
-│   └── src/
-│       ├── kb/                 # mcp-kb bridge
-│       └── public/             # news, contacts, library, sveden
+│
 ├── litellm/
-│   └── config.yaml             # 3 модели + Redis
+│   └── config.yaml             # ~15 моделей + fallback chains + Redis
+│
+├── bot-vk/                     # Бот ВКонтакте
+├── bot-max/                    # Бот Max (OnlinePatrol)
+│
 └── scripts/
     ├── test.sh
     ├── test_curl.sh
-    └── crawl_confluence.py     # Confluence-парсер (запуск с хоста)
+    └── crawl_confluence.py     # Confluence-парсер (с хоста)
 ```
 
 ## Конфигурация
@@ -289,8 +377,12 @@ v3/
 
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|----------|
-| `MISTRAL_API_KEY` | — | API-ключ Mistral (обязательно) |
+| `ZEN_API_KEY` | — | API-ключ OpenCode Zen (основной, обязательно) |
+| `MISTRAL_API_KEY` | — | API-ключ Mistral (эмбеддинги, резерв) |
+| `OPENROUTER_API_KEY` | — | API-ключ OpenRouter (резервные модели) |
 | `LITELLM_MASTER_KEY` | `sk-litellm-master-key-v3` | Мастер-ключ LiteLLM |
+| `AUTH_SECRET` | `changeme-auth-secret-v3` | Secret для JWT LobeChat |
+| `KEY_VAULTS_SECRET` | `changeme-dev-secret-v3` | Secret для шифрования ключей LobeChat |
 | `POSTGRES_DB` | `voproshalych` | Имя БД |
 | `POSTGRES_USER` | `voproshalych` | Пользователь БД |
 | `POSTGRES_PASSWORD` | `voproshalych` | Пароль БД |
@@ -310,6 +402,7 @@ v3/
 | mcp-contacts | 9012 | 9012 |
 | mcp-library | 9013 | 9013 |
 | mcp-sveden | 9014 | 9014 |
+| mcp-fetch | 9015 | 9015 |
 
 ## Тестирование
 
@@ -321,11 +414,11 @@ bash scripts/test.sh
 
 # Curl-тесты (health, MCP, LiteLLM, chat)
 make test-curl
-# или
-bash scripts/test_curl.sh
 
-# Линтинг
-make lint
+# Unit-тесты по модулям
+cd kb-service && uv run pytest -q    # 17 тестов
+cd mcp-servers && uv run pytest -q   # 17 тестов
+cd agent-service && uv run pytest -q  # 29 тестов
 ```
 
 ## Сети
@@ -333,11 +426,14 @@ make lint
 | Сеть | Тип | Описание |
 |------|-----|----------|
 | `v3-net` | bridge | Внутренняя сеть v3 |
-| `v2-net` | external (опционально) | Для доступа к v2 сервисам |
 
 ## Планы
 
-- [ ] Брендинг LobeChat (логотип, цвета, название "Вопрошалыч")
+- [x] Брендинг LobeChat (pixel cat логотип, #00aeef, custom.js, consent screen)
+- [x] Аутентификация (LobeHub server-mode + Better Auth, email+password)
+- [x] Трассировка запросов (trace_logger, GET /trace)
+- [x] MCP-сервер fetch_url
+- [x] Локальные эмбеддинги (deepvk/USER-bge-m3)
 - [ ] Multi-tenant workspace (applicant, student, staff)
 - [ ] MCP-серверы персональных данных (Modeus, LMS, Email)
 - [ ] Метрики и мониторинг (Prometheus + Grafana)

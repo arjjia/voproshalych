@@ -1,13 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" fill="none">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#6366F1"/>
-      <stop offset="100%" stop-color="#8B5CF6"/>
+      <stop offset="0%" stop-color="#00aeef"/>
+      <stop offset="100%" stop-color="#0095cc"/>
     </linearGradient>
   </defs>
   <rect x="0" y="4" width="52" height="52" rx="12" fill="url(#bg)"/>
-  <text x="26" y="40" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="white" text-anchor="middle">?</text>
-  <text x="64" y="42" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#E4E4E7">
+  <g transform="translate(8, 6)" fill="white">
+    <rect x="5" y="10" width="40" height="32" rx="4"/>
+    <rect x="12" y="24" width="6" height="12" rx="3"/>
+    <rect x="32" y="24" width="6" height="12" rx="3"/>
+    <ellipse cx="17" cy="22" rx="2" ry="3" fill="#00aeef"/>
+    <ellipse cx="33" cy="22" rx="2" ry="3" fill="#00aeef"/>
+    <ellipse cx="24" cy="32" rx="3" ry="2.5" fill="#00aeef"/>
+    <path d="M14 28 Q25 32 36 28" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  </g>
+  <text x="64" y="42" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="#00aeef">
     Вопрошалыч
   </text>
 </svg>

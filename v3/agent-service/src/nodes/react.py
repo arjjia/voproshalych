@@ -10,6 +10,7 @@ import logging
 from ..config import settings
 from ..models import AgentState
 from ..mcp_client import MCPClient
+from ..trace_logger import write_trace
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ MCP_SERVERS = [
     ("sveden", settings.mcp_sveden_url, "get_sveden_info", "Сведения об организации"),
     ("structure", settings.mcp_sveden_url, "get_structure", "Структура ТюмГУ"),
     ("management", settings.mcp_sveden_url, "get_management", "Руководство ТюмГУ"),
+    ("fetch", settings.mcp_fetch_url, "fetch_url", "Загрузить содержимое веб-страницы по URL"),
 ]
 
 TOOLS_DESCRIPTION = "\n".join(
@@ -70,6 +72,11 @@ async def react_node(state: AgentState) -> AgentState:
     for iteration in range(max_iterations):
         logger.info(f"react iteration {iteration + 1}/{max_iterations}")
 
+        await write_trace(
+            request_id=state.request_id, step=iteration + 1, phase="reasoning",
+            thought=f"Iteration {iteration + 1}/{max_iterations}: анализирую запрос",
+        )
+
         history_str = json.dumps(history, ensure_ascii=False, indent=2) if history else "Пока нет вызовов."
         dialog_context_block = f"История диалога:\n{state.dialog_context[:500]}\n\n" if state.dialog_context else ""
         prompt = REACT_SYSTEM_PROMPT.format(
@@ -95,11 +102,23 @@ async def react_node(state: AgentState) -> AgentState:
             state.final_answer = data.get("answer", "Ответ сформирован.")
             state.sources = data.get("sources", [])
             logger.info(f"react: final answer: {state.final_answer[:100]}...")
+
+            await write_trace(
+                request_id=state.request_id, step=iteration + 1, phase="evaluation",
+                thought="Финальный ответ сформирован",
+                observation=f"Ответ: {state.final_answer[:200]}",
+            )
             return state
 
         if action == "call_tool":
             tool_name = data.get("tool", "")
             tool_args = data.get("args", {})
+
+            await write_trace(
+                request_id=state.request_id, step=iteration + 1, phase="acting",
+                action=f"call_{tool_name}",
+                action_input=json.dumps(tool_args, ensure_ascii=False),
+            )
 
             server_name = tool_name
             server_url = ""
@@ -114,12 +133,22 @@ async def react_node(state: AgentState) -> AgentState:
                     "tool": tool_name,
                     "error": f"Инструмент {tool_name} не найден",
                 })
+                await write_trace(
+                    request_id=state.request_id, step=iteration + 1, phase="evaluation",
+                    action="error",
+                    observation=f"Инструмент {tool_name} не найден",
+                )
                 continue
 
             try:
                 client = MCPClient(server_url)
                 result = await client.call_tool(tool_name.split("_")[-1] if "_" in tool_name else tool_name, tool_args)
                 result_text = _extract_text(result.get("content", "") if result else "")
+
+                await write_trace(
+                    request_id=state.request_id, step=iteration + 1, phase="evaluation",
+                    observation=f"Результат: {result_text[:300]}",
+                )
 
                 history.append({
                     "step": iteration + 1,
@@ -129,6 +158,11 @@ async def react_node(state: AgentState) -> AgentState:
                 })
             except Exception as e:
                 logger.error(f"react: tool error {tool_name}: {e}")
+                await write_trace(
+                    request_id=state.request_id, step=iteration + 1, phase="evaluation",
+                    action="error",
+                    observation=f"Ошибка вызова {tool_name}: {e}",
+                )
                 history.append({
                     "step": iteration + 1,
                     "tool": tool_name,
