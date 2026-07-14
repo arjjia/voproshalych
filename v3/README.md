@@ -188,6 +188,27 @@ curl http://localhost:4000/health/readiness
 # → {"status":"ok"}
 ```
 
+### 2.5. Очистка базы знаний (опционально)
+
+Если нужно перезаполнить базу знаний — удалить все чанки и эмбеддинги:
+
+```bash
+docker compose exec kb-service python /app/scripts/clear_kb.py
+```
+
+Или через psql напрямую:
+
+```bash
+docker compose exec postgres psql -U voproshalych -d voproshalych \
+  -c "TRUNCATE kb_embeddings CASCADE; TRUNCATE kb_chunks CASCADE;"
+```
+
+Или с хоста (через проброс порта 5433):
+
+```bash
+python scripts/clear_kb.py --db-host localhost --db-port 5433
+```
+
 ### 3. Заполнение базы знаний
 
 **Стандартные источники** (работают из Docker):

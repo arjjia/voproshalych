@@ -92,6 +92,8 @@ services:
       - "8005:8004"
     env_file:
       - .env
+    volumes:
+      - ../scripts:/app/scripts
     environment:
       KB_PORT: 8004
     depends_on:
