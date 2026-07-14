@@ -77,7 +77,7 @@ async def _generate_final_answer(query: str, kb_context: str, dialog_context: st
     )
 
     payload = {
-        "model": settings.llm_model,
+        "model": settings.model_priority[0],
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 2048,
         "temperature": 0.7,

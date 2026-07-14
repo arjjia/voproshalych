@@ -204,8 +204,8 @@ async def _store_parsed_document_logged(
     logger.info("  [%d/%d] Chunking: %s ...", idx, total, doc.title)
     chunks = await sentence_aware_chunking(
         content,
-        chunk_size=settings.chunk_size,
-        overlap=settings.chunk_overlap,
+        max_chars=settings.max_chars,
+        overlap=settings.overlap,
     )
     if not chunks:
         logger.warning("  [%d/%d] SKIP (no chunks): %s", idx, total, doc.title)
@@ -360,8 +360,8 @@ async def _store_parsed_document(doc: ParsedDocument) -> dict:
     logger.info("Chunking: %s ...", doc.title)
     chunks = await sentence_aware_chunking(
         content,
-        chunk_size=settings.chunk_size,
-        overlap=settings.chunk_overlap,
+        max_chars=settings.max_chars,
+        overlap=settings.overlap,
     )
     if not chunks:
         logger.warning("SKIP (no chunks): %s", doc.title)

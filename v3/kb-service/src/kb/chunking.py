@@ -1,3 +1,12 @@
+"""Чанкинг текста с разбиением по предложениям, размер в символах.
+
+Алгоритм:
+1. Разбить текст на параграфы (по двойному переносу строки).
+2. Каждый параграф — на предложения (по . ! ? + заглавная, ; — и т.д.).
+3. Собирать чанки по символам (max_chars=500, overlap=50).
+4. Длинные предложения (>1.5 от max_chars) разрезать по переносам строк.
+"""
+
 import re
 
 _SENTENCE_SPLIT_RE = re.compile(
@@ -7,20 +16,13 @@ _SENTENCE_SPLIT_RE = re.compile(
 )
 
 
-def _default_tokenizer(text: str) -> int:
-    return len(text.split())
-
-
 async def sentence_aware_chunking(
     text: str,
-    chunk_size: int = 300,
-    overlap: int = 30,
-    tokenizer=None,
+    max_chars: int = 500,
+    overlap: int = 50,
 ) -> list[dict]:
     if not text or not text.strip():
         return []
-
-    count_tokens = tokenizer if tokenizer else _default_tokenizer
 
     paragraphs = re.split(r"\n\s*\n", text)
     sentences = []
@@ -39,62 +41,59 @@ async def sentence_aware_chunking(
 
     chunks: list[dict] = []
     current_sentences: list[str] = []
-    current_tokens = 0
+    current_chars = 0
 
     for sent in sentences:
-        sent_tokens = count_tokens(sent)
+        sent_chars = len(sent)
 
-        if sent_tokens > chunk_size * 1.5:
+        if sent_chars > max_chars * 1.5:
             sub_lines = [s.strip() for s in sent.split("\n") if s.strip()]
             if len(sub_lines) > 1:
                 for line in sub_lines:
-                    line_tokens = count_tokens(line)
-                    if current_tokens + line_tokens > chunk_size and current_sentences:
+                    line_chars = len(line)
+                    if current_chars + line_chars > max_chars and current_sentences:
                         chunk_text = " ".join(current_sentences)
                         chunks.append({
                             "content": chunk_text.strip(),
                             "chunk_order_index": len(chunks),
-                            "tokens": current_tokens,
-                            "token_count": current_tokens,
+                            "chars": current_chars,
                         })
                         current_sentences = []
-                        current_tokens = 0
+                        current_chars = 0
                     current_sentences.append(line)
-                    current_tokens += line_tokens
+                    current_chars += line_chars
                 continue
 
-        if current_tokens + sent_tokens > chunk_size and current_sentences:
+        if current_chars + sent_chars > max_chars and current_sentences:
             chunk_text = " ".join(current_sentences)
             chunks.append({
                 "content": chunk_text.strip(),
                 "chunk_order_index": len(chunks),
-                "tokens": current_tokens,
-                "token_count": current_tokens,
+                "chars": current_chars,
             })
 
             overlap_sentences = []
-            overlap_tokens = 0
+            overlap_chars = 0
             for s in reversed(current_sentences):
-                s_tok = count_tokens(s)
-                if overlap_tokens + s_tok <= overlap or not overlap_sentences:
+                s_chars = len(s)
+                if overlap_chars + s_chars <= overlap or not overlap_sentences:
                     overlap_sentences.insert(0, s)
-                    overlap_tokens += s_tok
+                    overlap_chars += s_chars
                 else:
                     break
 
             current_sentences = list(overlap_sentences)
-            current_tokens = overlap_tokens
+            current_chars = overlap_chars
 
         current_sentences.append(sent)
-        current_tokens += sent_tokens
+        current_chars += sent_chars
 
     if current_sentences:
         chunk_text = " ".join(current_sentences)
         chunks.append({
             "content": chunk_text.strip(),
             "chunk_order_index": len(chunks),
-            "tokens": current_tokens,
-            "token_count": current_tokens,
+            "chars": current_chars,
         })
 
     return chunks

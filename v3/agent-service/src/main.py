@@ -54,7 +54,7 @@ graph = build_graph()
 async def lifespan(app: FastAPI):
     logger.info("agent-service starting...")
     logger.info(f"LiteLLM: {settings.litellm_url}")
-    logger.info(f"Model: {settings.llm_model}")
+    logger.info(f"Primary model: {settings.model_priority[0]}")
     logger.info(f"MCP servers: kb={settings.mcp_kb_url}, news={settings.mcp_news_url}")
     yield
     logger.info("agent-service shutting down...")
@@ -220,7 +220,7 @@ async def openai_models():
             "object": "list",
             "data": [
                 {
-                    "id": settings.llm_model,
+                    "id": settings.model_priority[0],
                     "object": "model",
                     "created": int(time.time()),
                     "owned_by": "voproshalych",

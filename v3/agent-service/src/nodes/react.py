@@ -178,7 +178,7 @@ async def _call_llm(prompt: str) -> str:
     import httpx
 
     payload = {
-        "model": settings.llm_model,
+        "model": settings.model_priority[0],
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 1024,
         "temperature": 0.3,

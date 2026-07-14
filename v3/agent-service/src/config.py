@@ -12,6 +12,23 @@ class Settings(BaseSettings):
     classifier_model: str = "mistral-classifier"
     embedding_model: str = "mistral-embed"
 
+    # Приоритет моделей (первая доступная = самая приоритетная)
+    model_priority: list[str] = [
+        "nemotron-super-or",
+        "nemotron-ultra-free",
+        "gpt-oss-or",
+        "deepseek-v4-flash-free",
+        "llama-70b-or",
+        "qwen-coder-or",
+        "gemma-31b-or",
+        "hy3-free",
+        "mimo-free",
+        "code-free",
+        "pickle-free",
+        "glm-5.2",
+        "mistral-nemo",
+    ]
+
     mcp_kb_url: str = "http://mcp-kb:9010"
     mcp_news_url: str = "http://mcp-news:9011"
     mcp_contacts_url: str = "http://mcp-contacts:9012"

@@ -138,7 +138,7 @@ async def classify_and_expand(
             "Content-Type": "application/json",
         }
         payload = {
-            "model": s.classifier_model,
+            "model": s.model_priority[0],
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "max_tokens": 256,
