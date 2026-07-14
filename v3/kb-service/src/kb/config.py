@@ -21,19 +21,19 @@ class Settings(BaseSettings):
 
     # Приоритет моделей (первая доступная = самая приоритетная)
     model_priority: list[str] = [
-        "nemotron-super-or",
         "nemotron-ultra-free",
+        "nemotron-super-or",
         "gpt-oss-or",
         "deepseek-v4-flash-free",
         "llama-70b-or",
+        "glm-5.2",
         "qwen-coder-or",
         "gemma-31b-or",
         "hy3-free",
         "mimo-free",
+        "mistral-nemo",
         "code-free",
         "pickle-free",
-        "glm-5.2",
-        "mistral-nemo",
     ]
 
     model_config = {"env_file": ".env"}

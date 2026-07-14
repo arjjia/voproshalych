@@ -5,19 +5,10 @@ general_settings:
 
 model_list:
   # ═══════════════════════════════════════════════
-  #  FREE — OpenCode Zen (основной упор)
+  #  PRIORITY 1 — Nvidia Nemotron 3 Ultra 550B (ZEN free, самый мощный)
   # ═══════════════════════════════════════════════
 
-  - model_name: deepseek-v4-flash-free    # DeepSeek V4 Flash — быстрый универсал
-    litellm_params:
-      model: openai/deepseek-v4-flash-free
-      api_key: os.environ/ZEN_API_KEY
-      api_base: https://opencode.ai/zen/v1
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: nemotron-ultra-free       # Nvidia Nemotron 3 Ultra 550B — reasoning
+  - model_name: nemotron-ultra-free
     litellm_params:
       model: openai/nemotron-3-ultra-free
       api_key: os.environ/ZEN_API_KEY
@@ -26,7 +17,97 @@ model_list:
     model_info:
       mode: chat
 
-  - model_name: hy3-free                  # Tencent HY3 — анализ, многоязычность
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 2 — Nvidia Nemotron 3 Super 120B (OpenRouter free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: nemotron-super-or
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 3 — OpenAI GPT-OSS 120B (OpenRouter free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: gpt-oss-or
+    litellm_params:
+      model: openrouter/openai/gpt-oss-120b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 4 — DeepSeek V4 Flash (ZEN free, быстрый универсал)
+  # ═══════════════════════════════════════════════
+
+  - model_name: deepseek-v4-flash-free
+    litellm_params:
+      model: openai/deepseek-v4-flash-free
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 5 — Llama 3.3 70B Instruct (OpenRouter free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: llama-70b-or
+    litellm_params:
+      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 6 — Zhipu GLM 5.2 (ZEN paid cheap, сильный reasoning)
+  # ═══════════════════════════════════════════════
+
+  - model_name: glm-5.2
+    litellm_params:
+      model: openai/glm-5.2
+      api_key: os.environ/ZEN_API_KEY
+      api_base: https://opencode.ai/zen/v1
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 7 — Qwen3 Coder 33B (OpenRouter free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: qwen-coder-or
+    litellm_params:
+      model: openrouter/qwen/qwen3-coder:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 8 — Gemma 4 31B IT (OpenRouter free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: gemma-31b-or
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 9 — Tencent HY3 (ZEN free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: hy3-free
     litellm_params:
       model: openai/hy3-free
       api_key: os.environ/ZEN_API_KEY
@@ -35,7 +116,11 @@ model_list:
     model_info:
       mode: chat
 
-  - model_name: mimo-free                 # Xiaomi MiMo v2.5
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 10 — Xiaomi MiMo v2.5 (ZEN free)
+  # ═══════════════════════════════════════════════
+
+  - model_name: mimo-free
     litellm_params:
       model: openai/mimo-v2.5-free
       api_key: os.environ/ZEN_API_KEY
@@ -44,7 +129,23 @@ model_list:
     model_info:
       mode: chat
 
-  - model_name: code-free                 # North Mini Code — программирование
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 11 — Mistral Nemo 12B (Mistral API paid)
+  # ═══════════════════════════════════════════════
+
+  - model_name: mistral-nemo
+    litellm_params:
+      model: mistral/open-mistral-nemo
+      api_key: os.environ/MISTRAL_API_KEY
+      max_tokens: 4096
+    model_info:
+      mode: chat
+
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 12 — North Mini Code (ZEN free, экспериментальная)
+  # ═══════════════════════════════════════════════
+
+  - model_name: code-free
     litellm_params:
       model: openai/north-mini-code-free
       api_key: os.environ/ZEN_API_KEY
@@ -53,7 +154,11 @@ model_list:
     model_info:
       mode: chat
 
-  - model_name: pickle-free               # Big Pickle — экспериментальная
+  # ═══════════════════════════════════════════════
+  #  PRIORITY 13 — Big Pickle (ZEN free, экспериментальная)
+  # ═══════════════════════════════════════════════
+
+  - model_name: pickle-free
     litellm_params:
       model: openai/big-pickle
       api_key: os.environ/ZEN_API_KEY
@@ -63,71 +168,10 @@ model_list:
       mode: chat
 
   # ═══════════════════════════════════════════════
-  #  FREE — OpenRouter (фолбэки, другой выбор)
+  #  CLASSIFIER — Mistral Nemo (дешёвая классификация)
   # ═══════════════════════════════════════════════
 
-  - model_name: nemotron-super-or         # Nemotron 3 Super 120B (1M ctx)
-    litellm_params:
-      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: llama-70b-or              # Llama 3.3 70B Instruct
-    litellm_params:
-      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: gpt-oss-or                # OpenAI GPT-OSS 120B
-    litellm_params:
-      model: openrouter/openai/gpt-oss-120b:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: qwen-coder-or             # Qwen3 Coder (1M ctx)
-    litellm_params:
-      model: openrouter/qwen/qwen3-coder:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: gemma-31b-or              # Google Gemma 4 31B
-    litellm_params:
-      model: openrouter/google/gemma-4-31b-it:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  # ═══════════════════════════════════════════════
-  #  LIGHT — платные, дешёвые
-  # ═══════════════════════════════════════════════
-
-  - model_name: glm-5.2                   # GLM 5.2 — основной лёгкий
-    litellm_params:
-      model: openai/glm-5.2
-      api_key: os.environ/ZEN_API_KEY
-      api_base: https://opencode.ai/zen/v1
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: mistral-nemo              # Mistral Nemo (через Mistral API)
-    litellm_params:
-      model: mistral/open-mistral-nemo
-      api_key: os.environ/MISTRAL_API_KEY
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  - model_name: mistral-classifier        # Mistral Nemo — дешёвая классификация
+  - model_name: mistral-classifier
     litellm_params:
       model: mistral/open-mistral-nemo
       api_key: os.environ/MISTRAL_API_KEY
@@ -152,16 +196,32 @@ model_list:
 # ═══════════════════════════════════════════════════
 
 fallbacks:
-  # Free → Free → Free
+  # Priority 1 → 2, 4, 5
+  - nemotron-ultra-free: [nemotron-super-or, deepseek-v4-flash-free, llama-70b-or]
+  # Priority 2 → 1, 3, 4
+  - nemotron-super-or: [nemotron-ultra-free, gpt-oss-or, deepseek-v4-flash-free]
+  # Priority 3 → 2, 4, 5
+  - gpt-oss-or: [nemotron-super-or, deepseek-v4-flash-free, llama-70b-or]
+  # Priority 4 → 1, 9, 5
   - deepseek-v4-flash-free: [nemotron-ultra-free, hy3-free, llama-70b-or]
-  - nemotron-ultra-free: [deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or]
-  - hy3-free: [deepseek-v4-flash-free, nemotron-ultra-free, llama-70b-or]
-  - mimo-free: [deepseek-v4-flash-free, hy3-free, gemma-31b-or]
-  - code-free: [qwen-coder-or, deepseek-v4-flash-free, nemotron-ultra-free]
-  - pickle-free: [deepseek-v4-flash-free, nemotron-ultra-free]
-  # Light → Free fallback
+  # Priority 5 → 4, 2, 3
+  - llama-70b-or: [deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or]
+  # Priority 6 → 4, 11, 1
   - glm-5.2: [deepseek-v4-flash-free, mistral-nemo, nemotron-ultra-free]
+  # Priority 7 → 4, 1, 8
+  - qwen-coder-or: [deepseek-v4-flash-free, nemotron-ultra-free, gemma-31b-or]
+  # Priority 8 → 4, 9, 11
+  - gemma-31b-or: [deepseek-v4-flash-free, hy3-free, mistral-nemo]
+  # Priority 9 → 4, 1, 5
+  - hy3-free: [deepseek-v4-flash-free, nemotron-ultra-free, llama-70b-or]
+  # Priority 10 → 4, 9, 8
+  - mimo-free: [deepseek-v4-flash-free, hy3-free, gemma-31b-or]
+  # Priority 11 → 4, 6, 1
   - mistral-nemo: [deepseek-v4-flash-free, glm-5.2, nemotron-ultra-free]
+  # Priority 12 → 7, 4, 1
+  - code-free: [qwen-coder-or, deepseek-v4-flash-free, nemotron-ultra-free]
+  # Priority 13 → 4, 1
+  - pickle-free: [deepseek-v4-flash-free, nemotron-ultra-free]
 
 litellm_settings:
   drop_params: true

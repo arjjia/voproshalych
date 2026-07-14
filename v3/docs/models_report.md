@@ -7,22 +7,24 @@
 
 ## Структура пула
 
-Пул состоит из трёх групп моделей, упорядоченных по приоритету использования:
+Пул состоит из трёх групп моделей, упорядоченных по приоритету:
 
 ### 1. OpenCode ZEN — Free (бесплатные)
 
 Провайдер: `https://opencode.ai/zen/v1`  
 API-ключ: `ZEN_API_KEY` (в .env)
 
-| ID в пуле | Реальная модель | Разработчик | Контекст | Примечание |
+| ID в пуле | Реальная модель | Разработчик | Параметры | Контекст |
 |---|---|---|---|---|
-| `deepseek-v4-flash-free` | DeepSeek V4 Flash | DeepSeek | 128K | Быстрый универсал, ≈ GPT-4o mini |
-| `nemotron-ultra-free` | Nemotron 3 Ultra | Nvidia | 128K | 550B параметров, сильный reasoning |
-| `hy3-free` | HY3 | Tencent | 128K | Анализ, многоязычность |
-| `mimo-free` | MiMo v2.5 | Xiaomi | 128K | Общего назначения |
-| `code-free` | North Mini Code | North AI | 128K | Специализация: код |
-| `pickle-free` | Big Pickle | OpenCode | 128K | Экспериментальная |
-| `glm-5.2` | GLM 5.2 | Zhipu AI | 128K | **Условно-бесплатный** (дешёвый) |
+| `nemotron-ultra-free` | Nemotron 3 Ultra | Nvidia | **550B** | 128K |
+| `deepseek-v4-flash-free` | DeepSeek V4 Flash | DeepSeek | ? | 128K |
+| `glm-5.2` | GLM 5.2 | Zhipu AI | ? (≈30B?) | 128K |
+| `hy3-free` | HY3 | Tencent | ? | 128K |
+| `mimo-free` | MiMo v2.5 | Xiaomi | ? | 128K |
+| `code-free` | North Mini Code | North AI | ? | 128K |
+| `pickle-free` | Big Pickle | OpenCode | ? | 128K |
+
+> **Примечание:** `glm-5.2` — условно-бесплатный (дешёвый), остальные — полностью бесплатные.
 
 ### 2. OpenRouter — Free (бесплатные)
 
@@ -32,8 +34,8 @@ API-ключ: `OPENROUTER_API_KEY` (в .env)
 | ID в пуле | Реальная модель | Разработчик | Параметры | Контекст |
 |---|---|---|---|---|
 | `nemotron-super-or` | Nemotron 3 Super 120B | Nvidia | 120B | 1M |
-| `llama-70b-or` | Llama 3.3 70B Instruct | Meta | 70B | 128K |
 | `gpt-oss-or` | GPT-OSS 120B | OpenAI | 120B | 128K |
+| `llama-70b-or` | Llama 3.3 70B Instruct | Meta | 70B | 128K |
 | `qwen-coder-or` | Qwen3 Coder | Alibaba (Qwen) | 33B | 1M |
 | `gemma-31b-or` | Gemma 4 31B IT | Google | 31B | 128K |
 
@@ -58,25 +60,27 @@ API-ключ: `MISTRAL_API_KEY` (в .env)
 ## Приоритет моделей (от наиболее приоритетной к наименее)
 
 ```
-1. nemotron-super-or     — Nvidia Nemotron 3 Super 120B (1M ctx) [OpenRouter free]
-2. nemotron-ultra-free   — Nvidia Nemotron 3 Ultra 550B [ZEN free]
-3. gpt-oss-or            — OpenAI GPT-OSS 120B [OpenRouter free]
-4. deepseek-v4-flash-free — DeepSeek V4 Flash [ZEN free]
-5. llama-70b-or          — Llama 3.3 70B Instruct [OpenRouter free]
-6. qwen-coder-or         — Qwen3 Coder (1M ctx) [OpenRouter free]
-7. gemma-31b-or          — Gemma 4 31B IT [OpenRouter free]
-8. hy3-free              — Tencent HY3 [ZEN free]
-9. mimo-free             — Xiaomi MiMo v2.5 [ZEN free]
-10. code-free            — North Mini Code [ZEN free]
-11. pickle-free          — Big Pickle [ZEN free]
-12. glm-5.2              — Zhipu GLM 5.2 [ZEN paid cheap]
-13. mistral-nemo         — Mistral Nemo 12B [Mistral paid cheap]
+ 1. nemotron-ultra-free   — Nvidia Nemotron 3 Ultra 550B [ZEN free]       ← самый мощный
+ 2. nemotron-super-or     — Nvidia Nemotron 3 Super 120B (1M ctx) [OR free]
+ 3. gpt-oss-or            — OpenAI GPT-OSS 120B [OR free]
+ 4. deepseek-v4-flash-free — DeepSeek V4 Flash [ZEN free]                 ← доверие к бренду
+ 5. llama-70b-or          — Llama 3.3 70B Instruct [OR free]
+ 6. glm-5.2               — Zhipu GLM 5.2 [ZEN условно-бесплатный]       ← сильный reasoning
+ 7. qwen-coder-or         — Qwen3 Coder (1M ctx) [OR free]
+ 8. gemma-31b-or          — Gemma 4 31B IT [OR free]
+ 9. hy3-free              — Tencent HY3 [ZEN free]                        ← неизвестное качество
+10. mimo-free             — Xiaomi MiMo v2.5 [ZEN free]                   ← неизвестное качество
+11. mistral-nemo          — Mistral Nemo 12B [Mistral paid]
+12. code-free             — North Mini Code [ZEN free]                    ← экспериментальная
+13. pickle-free           — Big Pickle [ZEN free]                         ← экспериментальная
 ```
 
 Приоритет построен по принципу:
-- **Reasoning/мощь** (большие модели с сильным reasoning) — выше
-- **Бесплатные** — выше платных
-- **Специализированные** (code-free, pickle-free) — ниже универсальных
+- **Мощь / число параметров** — главный критерий: чем больше параметров, тем выше приоритет
+- **Бесплатные** — выше платных (при прочих равных)
+- **Проверенные модели** — выше экспериментальных (`code-free`, `pickle-free` — в самом низу)
+- **GLM 5.2 поднят** выше экспериментальных ZEN-моделей: по бенчмаркам он сильнее многих 30B+ моделей
+- **Mistral Nemo (12B)** — современная модель 2025 года, объективно сильнее экспериментальных `code-free` и `pickle-free`
 
 ---
 
@@ -94,14 +98,19 @@ API-ключ: `MISTRAL_API_KEY` (в .env)
 Если первая модель падает, LiteLLM автоматически переключается по цепочке:
 
 ```
-deepseek-v4-flash-free      → nemotron-ultra-free, hy3-free, llama-70b-or
-nemotron-ultra-free         → deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or
-hy3-free                    → deepseek-v4-flash-free, nemotron-ultra-free, llama-70b-or
-mimo-free                   → deepseek-v4-flash-free, hy3-free, gemma-31b-or
-code-free                   → qwen-coder-or, deepseek-v4-flash-free, nemotron-ultra-free
-pickle-free                 → deepseek-v4-flash-free, nemotron-ultra-free
-glm-5.2                     → deepseek-v4-flash-free, mistral-nemo, nemotron-ultra-free
-mistral-nemo                → deepseek-v4-flash-free, glm-5.2, nemotron-ultra-free
+nemotron-ultra-free      → deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or
+nemotron-super-or        → nemotron-ultra-free, gpt-oss-or, deepseek-v4-flash-free
+gpt-oss-or               → nemotron-super-or, deepseek-v4-flash-free, llama-70b-or
+deepseek-v4-flash-free   → nemotron-ultra-free, hy3-free, llama-70b-or
+llama-70b-or             → deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or
+glm-5.2                  → deepseek-v4-flash-free, mistral-nemo, nemotron-ultra-free
+qwen-coder-or            → deepseek-v4-flash-free, nemotron-ultra-free, gemma-31b-or
+gemma-31b-or             → deepseek-v4-flash-free, hy3-free, mistral-nemo
+hy3-free                 → deepseek-v4-flash-free, nemotron-ultra-free, llama-70b-or
+mimo-free                → deepseek-v4-flash-free, hy3-free, gemma-31b-or
+mistral-nemo             → deepseek-v4-flash-free, glm-5.2, nemotron-ultra-free
+code-free                → qwen-coder-or, deepseek-v4-flash-free, nemotron-ultra-free
+pickle-free              → deepseek-v4-flash-free, nemotron-ultra-free
 ```
 
 ---
@@ -112,19 +121,19 @@ mistral-nemo                → deepseek-v4-flash-free, glm-5.2, nemotron-ultra-
 
 ```python
 model_priority: list[str] = [
-    "nemotron-super-or",
     "nemotron-ultra-free",
+    "nemotron-super-or",
     "gpt-oss-or",
     "deepseek-v4-flash-free",
     "llama-70b-or",
+    "glm-5.2",
     "qwen-coder-or",
     "gemma-31b-or",
     "hy3-free",
     "mimo-free",
+    "mistral-nemo",
     "code-free",
     "pickle-free",
-    "glm-5.2",
-    "mistral-nemo",
 ]
 ```
 
