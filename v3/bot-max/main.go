@@ -129,8 +129,10 @@ func (c *AgentClient) ProcessMessage(ctx context.Context, incomingMsg IncomingMe
 
 func main() {
 	settings := NewSettings()
-	if settings.MaxBotToken == "" {
-		log.Fatal("MAX_BOT_TOKEN is not set")
+	for settings.MaxBotToken == "" {
+		log.Println("MAX_BOT_TOKEN is not set — retrying in 30s...")
+		time.Sleep(30 * time.Second)
+		settings = NewSettings()
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
