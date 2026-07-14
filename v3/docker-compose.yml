@@ -246,7 +246,7 @@ services:
       ENABLED_OLLAMA: "0"
       KEY_VAULTS_SECRET: ${KEY_VAULTS_SECRET:-changeme-dev-secret-v3}
       DATABASE_DRIVER: node
-      DATABASE_URL: postgresql://${POSTGRES_USER:-voproshalych}:${POSTGRES_PASSWORD:-voproshalych}@postgres:5432/${POSTGRES_DB:-voproshalych}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-voproshalych}:${POSTGRES_PASSWORD:-voproshalych}@postgres:5432/lobechat
       AUTH_SECRET: ${AUTH_SECRET:-changeme-auth-secret-v3}
       AUTH_SSO_PROVIDERS: ""
       AUTH_DISABLE_EMAIL_PASSWORD: "0"

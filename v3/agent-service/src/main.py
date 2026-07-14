@@ -204,18 +204,29 @@ class OpenAICompletionUsage(BaseModel):
 
 @app.get("/v1/models")
 async def openai_models():
-    """Список доступных моделей (OpenAI-совместимый)."""
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": settings.llm_model,
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "voproshalych",
-            },
-        ],
-    }
+    """Список доступных моделей (прокси к LiteLLM)."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{settings.litellm_url}/v1/models",
+                headers={"Authorization": f"Bearer {settings.litellm_master_key}"},
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception:
+        # Fallback: вернуть хотя бы основную модель
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "id": settings.llm_model,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": "voproshalych",
+                },
+            ],
+        }
 
 
 @app.post("/v1/embeddings")

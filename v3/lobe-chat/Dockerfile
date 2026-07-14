@@ -1,4 +1,3 @@
-## Build stage
 ARG NODEJS_VERSION="24"
 
 FROM node:${NODEJS_VERSION}-slim AS builder
@@ -66,6 +65,11 @@ ENV KEY_VAULTS_SECRET="use-for-build" \
 ENV NODE_OPTIONS="--max-old-space-size=2048" \
     TURBOPACK_WORKERS=1 \
     NEXT_TELEMETRY_DISABLED=1
+
+# Remove pg_search migrations (not available in our PostgreSQL)
+RUN rm -f /app/packages/database/migrations/0090_enable_pg_search.sql \
+          /app/packages/database/migrations/0093_add_bm25_indexes_with_icu.sql && \
+    node -e "var fs=require('fs');var j=JSON.parse(fs.readFileSync('/app/packages/database/migrations/meta/_journal.json','utf8'));j.entries=j.entries.filter(function(e){return ['0090_enable_pg_search','0093_add_bm25_indexes_with_icu'].indexOf(e.tag)<0});fs.writeFileSync('/app/packages/database/migrations/meta/_journal.json',JSON.stringify(j,null,2))"
 
 # Prebuild and build
 RUN pnpm exec tsx scripts/dockerPrebuild.mts
@@ -164,15 +168,7 @@ ENV EMAIL_SERVICE_PROVIDER="" \
     RESEND_API_KEY="" \
     RESEND_FROM=""
 
-# S3
-ENV NEXT_PUBLIC_S3_DOMAIN="" \
-    S3_PUBLIC_DOMAIN="" \
-    S3_ACCESS_KEY_ID="" \
-    S3_BUCKET="" \
-    S3_ENDPOINT="" \
-    S3_SECRET_ACCESS_KEY="" \
-    S3_ENABLE_PATH_STYLE="" \
-    S3_SET_ACL=""
+# S3 — not set to empty strings to avoid env validation errors
 
 USER 1001
 
