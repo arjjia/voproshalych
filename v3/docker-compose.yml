@@ -140,54 +140,6 @@ services:
     networks:
       - v3-net
 
-  mcp-contacts:
-    build:
-      context: ./mcp-servers
-      dockerfile: Dockerfile.public
-    container_name: v3-mcp-contacts
-    restart: unless-stopped
-    ports:
-      - "${MCP_CONTACTS_PORT:-9012}:9012"
-    env_file:
-      - .env
-    environment:
-      MCP_SERVER_TYPE: contacts
-      MCP_PORT: 9012
-    networks:
-      - v3-net
-
-  mcp-library:
-    build:
-      context: ./mcp-servers
-      dockerfile: Dockerfile.public
-    container_name: v3-mcp-library
-    restart: unless-stopped
-    ports:
-      - "${MCP_LIBRARY_PORT:-9013}:9013"
-    env_file:
-      - .env
-    environment:
-      MCP_SERVER_TYPE: library
-      MCP_PORT: 9013
-    networks:
-      - v3-net
-
-  mcp-sveden:
-    build:
-      context: ./mcp-servers
-      dockerfile: Dockerfile.public
-    container_name: v3-mcp-sveden
-    restart: unless-stopped
-    ports:
-      - "${MCP_SVEDEN_PORT:-9014}:9014"
-    env_file:
-      - .env
-    environment:
-      MCP_SERVER_TYPE: sveden
-      MCP_PORT: 9014
-    networks:
-      - v3-net
-
   mcp-fetch:
     build:
       context: ./mcp-servers

@@ -383,9 +383,6 @@ async def list_available_tools():
         "servers": [
             {"name": "mcp-kb", "url": settings.mcp_kb_url, "tools": ["kb_search"]},
             {"name": "mcp-news", "url": settings.mcp_news_url, "tools": ["get_news", "get_events"]},
-            {"name": "mcp-contacts", "url": settings.mcp_contacts_url, "tools": ["search_contacts"]},
-            {"name": "mcp-library", "url": settings.mcp_library_url, "tools": ["get_library_info", "get_library_services", "get_library_guides"]},
-            {"name": "mcp-sveden", "url": settings.mcp_sveden_url, "tools": ["get_sveden_info", "get_structure", "get_management"]},
             {"name": "mcp-fetch", "url": settings.mcp_fetch_url, "tools": ["fetch_url"]},
         ]
     }

@@ -63,9 +63,6 @@ SERVICES = {
     "redis": {"port": 6380},
     "mcp-kb": {"port": 9010},
     "mcp-news": {"port": 9011},
-    "mcp-contacts": {"port": 9012},
-    "mcp-library": {"port": 9013},
-    "mcp-sveden": {"port": 9014},
     "mcp-fetch": {"port": 9015},
 }
 
@@ -119,7 +116,7 @@ def check_health_endpoints():
     health("http://localhost:8005/health", "kb-service")
     health("http://localhost:4000/health/readiness", "litellm")
 
-    for svc in ["mcp-kb", "mcp-news", "mcp-contacts", "mcp-library", "mcp-sveden", "mcp-fetch"]:
+    for svc in ["mcp-kb", "mcp-news", "mcp-fetch"]:
         health(f"http://localhost:{SERVICES[svc]['port']}/health", svc)
 
 
@@ -283,7 +280,7 @@ def check_kb_tools():
 
 def check_mcp_servers_jsonrpc():
     section("10. MCP серверы JSON-RPC")
-    for svc in ["mcp-kb", "mcp-news", "mcp-contacts", "mcp-library", "mcp-sveden", "mcp-fetch"]:
+    for svc in ["mcp-kb", "mcp-news", "mcp-fetch"]:
         port = SERVICES[svc]["port"]
         check_jsonrpc(f"http://localhost:{port}/api/v1/tools", svc, "tools/list")
 

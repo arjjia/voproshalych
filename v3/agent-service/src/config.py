@@ -31,9 +31,6 @@ class Settings(BaseSettings):
 
     mcp_kb_url: str = "http://mcp-kb:9010"
     mcp_news_url: str = "http://mcp-news:9011"
-    mcp_contacts_url: str = "http://mcp-contacts:9012"
-    mcp_library_url: str = "http://mcp-library:9013"
-    mcp_sveden_url: str = "http://mcp-sveden:9014"
     mcp_fetch_url: str = "http://mcp-fetch:9015"
 
     model_config = {"env_prefix": "", "env_file": ".env.v3", "extra": "ignore"}

@@ -14,11 +14,7 @@ from kb.parsers import (
     ConfluenceHelpParser,
     ConfluenceStudyParser,
     ParsedDocument,
-    SvedenParser,
-    UtmnContactsParser,
-    UtmnFaqParser,
     UtmnNewsParser,
-    UtmnParser,
     WebPageParser,
 )
 from kb.preprocessing import QUESTION_TYPE_KB, QuestionClassification, classify_and_expand
@@ -75,33 +71,6 @@ TOOLS = [
         },
     },
     {
-        "name": "crawl_utmn",
-        "description": "Сканировать HTML-страницы utmn.ru начиная с указанного URL (BFS-обход). Извлекает текст и сохраняет в базу знаний.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "base_url": {"type": "string", "description": "Базовый URL для сканирования (по умолчанию https://www.utmn.ru)", "default": "https://www.utmn.ru"},
-                "max_pages": {"type": "integer", "description": "Максимум страниц для сканирования", "default": 50},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "crawl_sveden",
-        "description": "Сканировать портал sveden.utmn.ru. Извлекает PDF и HTML документы, сохраняет в базу знаний.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "base_url": {
-                    "type": "string",
-                    "description": "Базовый URL (по умолчанию https://sveden.utmn.ru/sveden/)",
-                    "default": "https://sveden.utmn.ru/sveden/",
-                },
-            },
-            "required": [],
-        },
-    },
-    {
         "name": "crawl_confluence_help",
         "description": "Сканировать Confluence Help space. Извлекает страницы и сохраняет в базу знаний.",
         "inputSchema": {
@@ -119,28 +88,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "source_url": {"type": "string", "description": "Базовый URL Confluence space"},
-            },
-            "required": ["source_url"],
-        },
-    },
-    {
-        "name": "crawl_utmn_faq",
-        "description": "Сканировать FAQ разделы utmn.ru. Сохраняет в базу знаний.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "source_url": {"type": "string", "description": "URL FAQ раздела"},
-            },
-            "required": ["source_url"],
-        },
-    },
-    {
-        "name": "crawl_utmn_contacts",
-        "description": "Сканировать контакты на utmn.ru. Сохраняет в базу знаний.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "source_url": {"type": "string", "description": "URL раздела с контактами"},
             },
             "required": ["source_url"],
         },
@@ -418,52 +365,6 @@ async def store_document(url: str, source_type: str) -> dict:
     return await _store_parsed_document(parsed)
 
 
-async def crawl_utmn(base_url: str = "https://www.utmn.ru", max_pages: int = 50) -> dict:
-    """Crawl utmn.ru pages and store in knowledge base."""
-    _log_separator("Источник: utmn.ru (HTML-страницы)")
-    parser = UtmnParser()
-    docs = await parser.get_documents(base_url, max_pages=max_pages)
-    total = len(docs)
-    results = []
-    for idx, doc in enumerate(docs, 1):
-        _log_doc_progress(idx, total, doc, "Crawled")
-        result = await _store_parsed_document_logged(doc, idx, total)
-        results.append(result)
-    stored = sum(1 for r in results if r["status"] == "ok")
-    logger.info("")
-    logger.info("Источник utmn.ru: %d документов, %d сохранено", total, stored)
-    _log_separator()
-    return {
-        "status": "ok",
-        "total": total,
-        "stored": stored,
-        "results": results,
-    }
-
-
-async def crawl_sveden(base_url: str = "https://sveden.utmn.ru/sveden/") -> dict:
-    """Crawl sveden.utmn.ru and store in knowledge base."""
-    _log_separator("Источник: sveden.utmn.ru")
-    parser = SvedenParser()
-    docs = await parser.get_documents(base_url)
-    total = len(docs)
-    results = []
-    for idx, doc in enumerate(docs, 1):
-        _log_doc_progress(idx, total, doc, "Parsed")
-        result = await _store_parsed_document_logged(doc, idx, total)
-        results.append(result)
-    stored = sum(1 for r in results if r["status"] == "ok")
-    logger.info("")
-    logger.info("Источник sveden: %d документов, %d сохранено", total, stored)
-    _log_separator()
-    return {
-        "status": "ok",
-        "total": total,
-        "stored": stored,
-        "results": results,
-    }
-
-
 async def crawl_confluence_help(source_url: str) -> dict:
     """Crawl Confluence Help space."""
     _log_separator("Источник: Confluence Help")
@@ -499,50 +400,6 @@ async def crawl_confluence_study(source_url: str) -> dict:
         results.append(result)
     stored = sum(1 for r in results if r["status"] == "ok")
     logger.info("Источник Confluence Study: %d документов, %d сохранено", total, stored)
-    _log_separator()
-    return {
-        "status": "ok",
-        "total": total,
-        "stored": stored,
-        "results": results,
-    }
-
-
-async def crawl_utmn_faq(source_url: str) -> dict:
-    """Crawl utmn.ru FAQ sections."""
-    _log_separator("Источник: utmn.ru FAQ")
-    parser = UtmnFaqParser()
-    docs = await parser.get_documents(source_url)
-    total = len(docs)
-    results = []
-    for idx, doc in enumerate(docs, 1):
-        _log_doc_progress(idx, total, doc, "Parsed")
-        result = await _store_parsed_document_logged(doc, idx, total)
-        results.append(result)
-    stored = sum(1 for r in results if r["status"] == "ok")
-    logger.info("Источник FAQ: %d документов, %d сохранено", total, stored)
-    _log_separator()
-    return {
-        "status": "ok",
-        "total": total,
-        "stored": stored,
-        "results": results,
-    }
-
-
-async def crawl_utmn_contacts(source_url: str) -> dict:
-    """Crawl utmn.ru contacts."""
-    _log_separator("Источник: utmn.ru Контакты")
-    parser = UtmnContactsParser()
-    docs = await parser.get_documents(source_url)
-    total = len(docs)
-    results = []
-    for idx, doc in enumerate(docs, 1):
-        _log_doc_progress(idx, total, doc, "Parsed")
-        result = await _store_parsed_document_logged(doc, idx, total)
-        results.append(result)
-    stored = sum(1 for r in results if r["status"] == "ok")
-    logger.info("Источник Контакты: %d документов, %d сохранено", total, stored)
     _log_separator()
     return {
         "status": "ok",
@@ -607,12 +464,8 @@ TOOL_FUNCTIONS = {
     "classify_query": classify_query,
     "kb_search_classified": kb_search_classified,
     "store_document": store_document,
-    "crawl_utmn": crawl_utmn,
-    "crawl_sveden": crawl_sveden,
     "crawl_confluence_help": crawl_confluence_help,
     "crawl_confluence_study": crawl_confluence_study,
-    "crawl_utmn_faq": crawl_utmn_faq,
-    "crawl_utmn_contacts": crawl_utmn_contacts,
     "crawl_utmn_news": crawl_utmn_news,
     "crawl_utmn_events": crawl_utmn_events,
 }

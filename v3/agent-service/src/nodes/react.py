@@ -18,12 +18,6 @@ MCP_SERVERS = [
     ("kb", settings.mcp_kb_url, "kb_search", "Поиск по базе знаний ТюмГУ"),
     ("news", settings.mcp_news_url, "get_news", "Новости ТюмГУ"),
     ("events", settings.mcp_news_url, "get_events", "Мероприятия ТюмГУ"),
-    ("contacts", settings.mcp_contacts_url, "search_contacts", "Контакты подразделений"),
-    ("library_info", settings.mcp_library_url, "get_library_info", "Информация о библиотеке"),
-    ("library_services", settings.mcp_library_url, "get_library_services", "Сервисы библиотеки"),
-    ("sveden", settings.mcp_sveden_url, "get_sveden_info", "Сведения об организации"),
-    ("structure", settings.mcp_sveden_url, "get_structure", "Структура ТюмГУ"),
-    ("management", settings.mcp_sveden_url, "get_management", "Руководство ТюмГУ"),
     ("fetch", settings.mcp_fetch_url, "fetch_url", "Загрузить содержимое веб-страницы по URL"),
 ]
 

@@ -3,10 +3,6 @@
 from .base import BaseParser, ParsedDocument
 from .confluence_help import ConfluenceHelpParser
 from .confluence_study import ConfluenceStudyParser
-from .sveden import SvedenParser
-from .utmn import UtmnParser
-from .utmn_contacts import UtmnContactsParser
-from .utmn_faq import UtmnFaqParser
 from .utmn_news import UtmnNewsParser
 from .web import WebPageParser
 
@@ -15,10 +11,6 @@ __all__ = [
     "ParsedDocument",
     "ConfluenceHelpParser",
     "ConfluenceStudyParser",
-    "SvedenParser",
-    "UtmnParser",
-    "UtmnContactsParser",
-    "UtmnFaqParser",
     "UtmnNewsParser",
     "WebPageParser",
 ]
