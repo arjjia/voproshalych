@@ -76,13 +76,14 @@ TOOLS = [
     },
     {
         "name": "crawl_utmn",
-        "description": "Сканировать страницы utmn.ru, начиная с указанного URL. Извлекает и сохраняет все документы в базу знаний.",
+        "description": "Сканировать HTML-страницы utmn.ru начиная с указанного URL (BFS-обход). Извлекает текст и сохраняет в базу знаний.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "base_url": {"type": "string", "description": "Базовый URL для сканирования"},
+                "base_url": {"type": "string", "description": "Базовый URL для сканирования (по умолчанию https://www.utmn.ru)", "default": "https://www.utmn.ru"},
+                "max_pages": {"type": "integer", "description": "Максимум страниц для сканирования", "default": 50},
             },
-            "required": ["base_url"],
+            "required": [],
         },
     },
     {
@@ -144,7 +145,114 @@ TOOLS = [
             "required": ["source_url"],
         },
     },
+    {
+        "name": "crawl_utmn_news",
+        "description": "Сканировать ленту новостей utmn.ru (stories). Сохраняет в базу знаний.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_url": {"type": "string", "description": "URL ленты новостей", "default": "https://www.utmn.ru/news/stories/"},
+                "max_pages": {"type": "integer", "description": "Количество страниц пагинации", "default": 3},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "crawl_utmn_events",
+        "description": "Сканировать ленту мероприятий utmn.ru (events). Сохраняет в базу знаний.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_url": {"type": "string", "description": "URL ленты мероприятий", "default": "https://www.utmn.ru/news/events/"},
+                "max_pages": {"type": "integer", "description": "Количество страниц пагинации", "default": 3},
+            },
+            "required": [],
+        },
+    },
 ]
+
+
+def _log_separator(title: str = "") -> None:
+    """Вывести разделитель с заголовком источника."""
+    line = "=" * 55
+    if title:
+        logger.info("")
+        logger.info(line)
+        logger.info("  %s", title)
+        logger.info(line)
+    else:
+        logger.info(line)
+
+
+def _log_doc_progress(idx: int, total: int, doc: ParsedDocument, phase: str = "Parsed") -> None:
+    """Вывести прогресс обработки документа."""
+    logger.info("[%d/%d] %s: %s", idx, total, phase, doc.title)
+    logger.info("       URL: %s", doc.url)
+    logger.info("       Length: %d chars", len(doc.text_content))
+
+
+async def _store_parsed_document_logged(
+    doc: ParsedDocument, idx: int, total: int,
+) -> dict:
+    """Chunk → Embed → Store с детальным логгированием."""
+    content = doc.text_content
+    if not content.strip():
+        logger.warning("  [%d/%d] SKIP (empty): %s", idx, total, doc.title)
+        return {"status": "skipped", "reason": "empty content", "url": doc.url}
+
+    # Chunking
+    logger.info("  [%d/%d] Chunking: %s ...", idx, total, doc.title)
+    chunks = await sentence_aware_chunking(
+        content,
+        chunk_size=settings.chunk_size,
+        overlap=settings.chunk_overlap,
+    )
+    if not chunks:
+        logger.warning("  [%d/%d] SKIP (no chunks): %s", idx, total, doc.title)
+        return {"status": "skipped", "reason": "no chunks", "url": doc.url}
+    logger.info("  [%d/%d] → %d chunks", idx, total, len(chunks))
+
+    # Embedding
+    logger.info("  [%d/%d] Embedding %d chunks ...", idx, total, len(chunks))
+    texts = [c["content"] for c in chunks]
+    embeddings = await get_embeddings_batch(texts)
+    logger.info("  [%d/%d] → %d embeddings (dim=%d)", idx, total, len(embeddings), len(embeddings[0]) if embeddings else 0)
+
+    # Store
+    doc_id = str(uuid.uuid4())
+    session_maker = async_sessionmaker(get_engine(), class_=AsyncSession, expire_on_commit=False)
+    async with session_maker() as session:
+        for i, (chunk_data, emb) in enumerate(zip(chunks, embeddings)):
+            chunk = KBChunk(
+                id=str(uuid.uuid4()),
+                doc_id=doc_id,
+                chunk_order_index=chunk_data.get("chunk_order_index", i),
+                tokens=chunk_data.get("tokens", 0),
+                content=chunk_data["content"],
+                title=doc.title,
+                source_url=doc.url,
+                source_type=doc.source_type,
+            )
+            session.add(chunk)
+            await session.flush()
+
+            embedding_row = KBEmbedding(
+                chunk_id=chunk.id,
+                embedding=emb,
+                model=settings.embedding_model,
+            )
+            session.add(embedding_row)
+
+        await session.commit()
+
+    logger.info("  [%d/%d] ✓ Stored: %s (%d chunks)", idx, total, doc.title, len(chunks))
+    return {
+        "status": "ok",
+        "chunks": len(chunks),
+        "doc_id": doc_id,
+        "url": doc.url,
+        "title": doc.title,
+    }
 
 
 def _format_context(results: list[dict]) -> str:
@@ -246,19 +354,24 @@ async def _store_parsed_document(doc: ParsedDocument) -> dict:
     """Chunk, embed, and store a single parsed document in the knowledge base."""
     content = doc.text_content
     if not content.strip():
+        logger.warning("SKIP (empty): %s", doc.title)
         return {"status": "skipped", "reason": "empty content", "url": doc.url}
 
+    logger.info("Chunking: %s ...", doc.title)
     chunks = await sentence_aware_chunking(
         content,
         chunk_size=settings.chunk_size,
         overlap=settings.chunk_overlap,
     )
-
     if not chunks:
+        logger.warning("SKIP (no chunks): %s", doc.title)
         return {"status": "skipped", "reason": "no chunks", "url": doc.url}
+    logger.info("→ %d chunks", len(chunks))
 
+    logger.info("Embedding %d chunks for: %s ...", len(chunks), doc.title)
     texts = [c["content"] for c in chunks]
     embeddings = await get_embeddings_batch(texts)
+    logger.info("→ %d embeddings done", len(embeddings))
 
     doc_id = str(uuid.uuid4())
 
@@ -287,6 +400,7 @@ async def _store_parsed_document(doc: ParsedDocument) -> dict:
 
         await session.commit()
 
+    logger.info("✓ Stored: %s (%d chunks)", doc.title, len(chunks))
     return {
         "status": "ok",
         "chunks": len(chunks),
@@ -304,98 +418,136 @@ async def store_document(url: str, source_type: str) -> dict:
     return await _store_parsed_document(parsed)
 
 
-async def crawl_utmn(base_url: str) -> dict:
+async def crawl_utmn(base_url: str = "https://www.utmn.ru", max_pages: int = 50) -> dict:
     """Crawl utmn.ru pages and store in knowledge base."""
+    _log_separator("Источник: utmn.ru (HTML-страницы)")
     parser = UtmnParser()
-    docs = await parser.get_documents(base_url)
+    docs = await parser.get_documents(base_url, max_pages=max_pages)
+    total = len(docs)
     results = []
-    for doc in docs:
-        result = await _store_parsed_document(doc)
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Crawled")
+        result = await _store_parsed_document_logged(doc, idx, total)
         results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("")
+    logger.info("Источник utmn.ru: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
 
 async def crawl_sveden(base_url: str = "https://sveden.utmn.ru/sveden/") -> dict:
     """Crawl sveden.utmn.ru and store in knowledge base."""
+    _log_separator("Источник: sveden.utmn.ru")
     parser = SvedenParser()
     docs = await parser.get_documents(base_url)
+    total = len(docs)
     results = []
-    for doc in docs:
-        result = await _store_parsed_document(doc)
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
         results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("")
+    logger.info("Источник sveden: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
 
 async def crawl_confluence_help(source_url: str) -> dict:
     """Crawl Confluence Help space."""
+    _log_separator("Источник: Confluence Help")
     parser = ConfluenceHelpParser()
     docs = await parser.get_documents(source_url)
+    total = len(docs)
     results = []
-    for doc in docs:
-        result = await _store_parsed_document(doc)
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
         results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("Источник Confluence Help: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
 
 async def crawl_confluence_study(source_url: str) -> dict:
     """Crawl Confluence Study space."""
+    _log_separator("Источник: Confluence Study")
     parser = ConfluenceStudyParser()
     docs = await parser.get_documents(source_url)
+    total = len(docs)
     results = []
-    for doc in docs:
-        result = await _store_parsed_document(doc)
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
         results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("Источник Confluence Study: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
 
 async def crawl_utmn_faq(source_url: str) -> dict:
     """Crawl utmn.ru FAQ sections."""
+    _log_separator("Источник: utmn.ru FAQ")
     parser = UtmnFaqParser()
     docs = await parser.get_documents(source_url)
+    total = len(docs)
     results = []
-    for doc in docs:
-        result = await _store_parsed_document(doc)
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
         results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("Источник FAQ: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
 
 async def crawl_utmn_contacts(source_url: str) -> dict:
     """Crawl utmn.ru contacts."""
+    _log_separator("Источник: utmn.ru Контакты")
     parser = UtmnContactsParser()
     docs = await parser.get_documents(source_url)
+    total = len(docs)
     results = []
-    for doc in docs:
-        result = await _store_parsed_document(doc)
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
         results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("Источник Контакты: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
@@ -405,13 +557,22 @@ async def crawl_utmn_news(
     max_pages: int = 3,
 ) -> dict:
     """Crawl новостей utmn.ru (stories) и сохранить в БЗ."""
+    _log_separator("Источник: utmn.ru Новости")
     parser = UtmnNewsParser(kind="news")
     docs = await parser.get_documents(source_url, max_pages=max_pages)
-    results = [await _store_parsed_document(doc) for doc in docs]
+    total = len(docs)
+    results = []
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
+        results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("Источник Новости: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 
@@ -421,13 +582,22 @@ async def crawl_utmn_events(
     max_pages: int = 3,
 ) -> dict:
     """Crawl мероприятий utmn.ru (events) и сохранить в БЗ."""
+    _log_separator("Источник: utmn.ru Мероприятия")
     parser = UtmnNewsParser(kind="events")
     docs = await parser.get_documents(source_url, max_pages=max_pages)
-    results = [await _store_parsed_document(doc) for doc in docs]
+    total = len(docs)
+    results = []
+    for idx, doc in enumerate(docs, 1):
+        _log_doc_progress(idx, total, doc, "Parsed")
+        result = await _store_parsed_document_logged(doc, idx, total)
+        results.append(result)
+    stored = sum(1 for r in results if r["status"] == "ok")
+    logger.info("Источник Мероприятия: %d документов, %d сохранено", total, stored)
+    _log_separator()
     return {
         "status": "ok",
-        "total": len(results),
-        "stored": sum(1 for r in results if r["status"] == "ok"),
+        "total": total,
+        "stored": stored,
         "results": results,
     }
 

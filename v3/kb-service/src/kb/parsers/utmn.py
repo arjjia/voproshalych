@@ -1,223 +1,175 @@
-"""Парсер для официального сайта ТюмГУ (www.utmn.ru).
+"""Парсер HTML-страниц официального сайта ТюмГУ (www.utmn.ru).
 
-Получает список страниц, на каждой странице находит ссылки на PDF документы,
-скачивает и парсит их.
+Обходит страницы в ширину (BFS) от стартового URL, собирает
+текстовое содержимое каждой HTML-страницы (без PDF).
 """
 
+from __future__ import annotations
+
 import logging
-import os
 import re
-from io import BytesIO
-from typing import Sequence
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
-import pdfplumber
-import pytesseract
 from bs4 import BeautifulSoup
-from PIL import Image
 
 from .base import BaseParser, ParsedDocument
-from .ocr_cache import get_ocr_config, get_tesseract_version
-
 
 logger = logging.getLogger(__name__)
 
+_UA = (
+    "Mozilla/5.0 (compatible; VoproshalychBot/1.0; "
+    "+https://voproshalych.ru)"
+)
+
+# Максимум страниц для сканирования
+_MAX_PAGES = 50
+# Максимум ссылок на странице для обхода
+_MAX_LINKS_PER_PAGE = 100
+
+# Паттерны путей, которые стоит сканировать (основные разделы)
+_INCLUDE_PATTERNS = [
+    "/about/", "/education/", "/science/", "/abiturient/",
+    "/students/", "/contacts/", "/sveden/", "/upload/",
+]
+# Паттерны, которые НЕ стоит сканировать
+_EXCLUDE_PATTERNS = [
+    r"\.pdf$", r"\.docx?$", r"\.xlsx?$", r"\.pptx?$",
+    r"\.jpg$", r"\.png$", r"\.gif$", r"\.svg$", r"\.ico$",
+    r"\.zip$", r"\.rar$", r"\.tar\.gz$",
+    r"/cdn/", r"/bitrix/", r"/local/",
+    r"#", r"javascript:",
+]
+
 
 class UtmnParser(BaseParser):
-    """Парсер для сайта ТюмГУ.
+    """Парсер HTML-страниц сайта ТюмГУ.
 
-    Получает страницы со списками PDF, находит ссылки на PDF, парсит каждый.
+    Использует BFS-обход от указанного URL, собирая все
+    доступные HTML-страницы того же домена.
     """
 
     def __init__(self) -> None:
-        """Инициализировать парсер."""
         self._base_url = "https://www.utmn.ru"
+        self._domain = "www.utmn.ru"
 
     def get_source_type(self) -> str:
-        """Вернуть тип источника."""
         return "utmn"
 
-    async def get_documents(self, source_url: str) -> list[ParsedDocument]:
-        """Получить PDF документы со страницы ТюмГУ.
+    def _should_include(self, url: str) -> bool:
+        """Проверить, стоит ли включать URL в обход."""
+        parsed = urlparse(url)
+        if parsed.netloc and parsed.netloc != self._domain:
+            return False
+        path = parsed.path or "/"
+        # Исключаем файлы
+        if any(re.search(p, path, re.IGNORECASE) for p in _EXCLUDE_PATTERNS):
+            return False
+        return True
 
-        Args:
-            source_url: URL страницы ТюмГУ со ссылками на PDF
+    def _extract_title(self, soup: BeautifulSoup, url: str) -> str:
+        """Извлечь заголовок страницы."""
+        h1 = soup.find("h1")
+        if h1:
+            return h1.get_text(strip=True)
+        title_tag = soup.find("title")
+        if title_tag:
+            return title_tag.get_text(strip=True)
+        return url
 
-        Returns:
-            Список распарсенных PDF документов
-        """
-        pdf_urls = await self._find_pdf_links(source_url)
-        logger.info(f"Найдено {len(pdf_urls)} PDF ссылок на {source_url}")
+    def _extract_text(self, soup: BeautifulSoup) -> str:
+        """Извлечь текстовое содержимое страницы."""
+        for tag in soup(["script", "style", "nav", "header", "footer",
+                         "form", "aside", "noscript"]):
+            tag.decompose()
 
-        documents = []
-        for pdf_url in pdf_urls:
-            doc = await self._parse_pdf(pdf_url)
-            if doc:
-                documents.append(doc)
-
-        return documents
-
-    async def get_documents_from_pages(
-        self, page_urls: Sequence[str]
-    ) -> list[ParsedDocument]:
-        """Получить PDF документы с нескольких страниц.
-
-        Args:
-            page_urls: Список URL страниц для обработки
-
-        Returns:
-            Список распарсенных PDF документов со всех страниц
-        """
-        all_documents = []
-        for page_url in page_urls:
-            documents = await self.get_documents(page_url)
-            all_documents.extend(documents)
-            logger.info(f"Обработана страница {page_url}: {len(documents)} PDF")
-        return all_documents
-
-    async def _find_pdf_links(self, url: str) -> list[str]:
-        """Найти все ссылки на PDF на странице.
-
-        Args:
-            url: URL страницы для поиска
-
-        Returns:
-            Список URL PDF файлов
-        """
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0)",
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            pdf_urls = set()
-            for link in soup.find_all("a", href=True):
-                href = str(link.get("href", ""))
-                if ".pdf" in href.lower():
-                    full_url = urljoin(self._base_url, href)
-                    pdf_urls.add(full_url)
-
-            return list(pdf_urls)
-
-        except Exception as e:
-            logger.error(f"Ошибка поиска PDF ссылок на {url}: {e}")
-            return []
-
-    async def _parse_pdf(self, url: str) -> ParsedDocument | None:
-        """Скачать и распарсить PDF файл.
-
-        Всегда использует Tesseract OCR для извлечения текста из любого PDF.
-
-        Args:
-            url: URL PDF файла
-
-        Returns:
-            ParsedDocument с содержимым или None при ошибке
-        """
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; VoproshalychBot/1.0)",
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-
-            pdf_bytes = BytesIO(response.content)
-
-            text_content = await self._extract_text_ocr(pdf_bytes)
-
-            text_content = self._clean_text(text_content)
-
-            if not text_content.strip():
-                logger.warning(f"Пустой контент в PDF: {url}")
-                return None
-
-            title = self._extract_title_from_url(url)
-            logger.info(f"Распарсен PDF: {title}")
-
-            return ParsedDocument(
-                url=url,
-                title=title,
-                text_content=text_content,
-                source_type=self.get_source_type(),
-            )
-
-        except Exception as e:
-            logger.error(f"Ошибка парсинга PDF {url}: {e}")
-            return None
-
-    async def _extract_text_ocr(self, pdf_bytes: BytesIO) -> str:
-        """Извлечь текст из PDF с использованием OCR (Tesseract).
-
-        Args:
-            pdf_bytes: PDF файл в памяти
-
-        Returns:
-            Текст из PDF
-        """
-        get_tesseract_version()
-        ocr_config = get_ocr_config()
-        pdf_bytes.seek(0)
-
-        with pdfplumber.open(pdf_bytes) as pdf:
-            pages_text = []
-            for page in pdf.pages:
-                page_image = page.to_image(resolution=220)
-                pil_image = page_image.original
-                ocr_text = pytesseract.image_to_string(
-                    pil_image,
-                    lang="rus+eng",
-                    config=" ".join(ocr_config),
-                )
-                if ocr_text and ocr_text.strip():
-                    pages_text.append(ocr_text.strip())
-
-            if pages_text:
-                return "\n".join(pages_text)
-
-        return ""
-
-    def _clean_text(self, text: str) -> str:
-        """Очистить текст от артефактов PDF.
-
-        Args:
-            text: Сырой текст из PDF
-
-        Returns:
-            Очищенный текст
-        """
-        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
-
-        text = re.sub(r"([а-яёА-ЯЁa-zA-Z0-9])\s{2,}", r"\1 ", text)
-
-        text = re.sub(r"\n{3,}", "\n\n", text)
-
-        lines = []
-        for line in text.splitlines():
-            line = line.strip()
-            if line:
-                lines.append(line)
-
+        container = (
+            soup.find("article")
+            or soup.select_one(".main__content")
+            or soup.select_one(".content")
+            or soup.select_one("main")
+            or soup.body
+            or soup
+        )
+        text = container.get_text(separator="\n", strip=True)
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         return "\n".join(lines)
 
-    def _extract_title_from_url(self, url: str) -> str:
-        """Извлечь название из URL PDF.
+    async def get_documents(self, source_url: str, max_pages: int = _MAX_PAGES) -> list[ParsedDocument]:
+        """Обойти страницы сайта и собрать документы.
 
         Args:
-            url: URL PDF файла
+            source_url: Стартовый URL для обхода.
+            max_pages: Максимум страниц для сканирования.
 
         Returns:
-            Название документа
+            Список распарсенных HTML-документов.
         """
-        filename = url.split("/")[-1]
-        filename = re.sub(r"\?.*$", "", filename)
-        filename = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
-        filename = filename.replace("-", " ").replace("_", " ")
-        return filename
+        visited: set[str] = set()
+        to_visit: list[str] = [source_url]
+        documents: list[ParsedDocument] = []
+
+        async with httpx.AsyncClient(
+            timeout=30.0, follow_redirects=True,
+            headers={"User-Agent": _UA},
+        ) as client:
+            while to_visit and len(visited) < max_pages:
+                url = to_visit.pop(0)
+                if url in visited:
+                    continue
+                if not self._should_include(url):
+                    continue
+                visited.add(url)
+
+                try:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                except Exception as exc:
+                    logger.debug("Skip %s: %s", url, exc)
+                    continue
+
+                # Проверяем, что это HTML
+                ct = resp.headers.get("content-type", "")
+                if "text/html" not in ct and "text/plain" not in ct:
+                    continue
+
+                soup = BeautifulSoup(resp.text, "html.parser")
+                title = self._extract_title(soup, url)
+                text = self._extract_text(soup)
+
+                if text.strip():
+                    documents.append(ParsedDocument(
+                        url=url,
+                        title=title,
+                        text_content=text,
+                        source_type=self.get_source_type(),
+                    ))
+
+                # Собираем ссылки для дальнейшего обхода
+                links_found = 0
+                for a in soup.find_all("a", href=True):
+                    if links_found >= _MAX_LINKS_PER_PAGE:
+                        break
+                    href = a["href"].strip()
+                    full_url = urljoin(url, href)
+                    parsed = urlparse(full_url)
+                    # Только тот же домен
+                    if parsed.netloc and parsed.netloc != self._domain:
+                        continue
+                    # Нормализуем URL (убираем query/fragment)
+                    clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                    if clean_url not in visited and clean_url not in to_visit:
+                        if self._should_include(clean_url):
+                            to_visit.append(clean_url)
+                            links_found += 1
+
+                logger.info(
+                    "[%d/%d] %s — %s (%d symbols)",
+                    len(documents), max_pages, title, url, len(text),
+                )
+
+        logger.info(
+            "Utmn crawl done (max_pages=%d): %d pages visited, %d documents collected",
+            max_pages, len(visited), len(documents),
+        )
+        return documents

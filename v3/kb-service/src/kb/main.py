@@ -1,11 +1,19 @@
 """KB Service v3 — FastAPI application."""
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from kb.config import settings
 from kb.db import Base, get_engine
 from kb.tools import TOOLS, execute_tool
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="KB Service v3")
 

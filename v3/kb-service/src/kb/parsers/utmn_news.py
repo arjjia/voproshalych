@@ -124,35 +124,50 @@ class UtmnNewsParser(BaseParser):
     def _parse_list(self, html: str, base: str) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         out: list[dict] = []
+
+        # Новости (stories): li.news-page__el > article
         for li in soup.select("li.news-page__el"):
             article = li.find("article", class_=lambda c: c and "article" in c)
             if not article:
                 continue
 
-            title_link = article.select_one(".article_title a") or article.find("a")
-            href = title_link.get("href") if title_link else None
-            title = title_link.get_text(strip=True) if title_link else ""
-            if not href:
-                continue
-            url = urljoin(base, href)
+            item = self._extract_from_article(article, base)
+            if item:
+                out.append(item)
 
-            category = ""
-            cat_tag = article.select_one(".category_title a")
-            if cat_tag:
-                category = cat_tag.get_text(strip=True)
+        # Мероприятия (events): article напрямую
+        if not out:
+            for article in soup.find_all("article", class_=lambda c: c and "article" in c):
+                item = self._extract_from_article(article, base)
+                if item:
+                    out.append(item)
 
-            date = self._extract_date(article)
-
-            out.append(
-                {
-                    "url": url,
-                    "title": title,
-                    "category": category,
-                    "date": date,
-                    "full_text": "",
-                }
-            )
         return out
+
+    def _extract_from_article(self, article, base: str) -> dict | None:
+        title_link = article.select_one(".article_title a") or article.find("a")
+        if not title_link:
+            return None
+        href = title_link.get("href")
+        title = title_link.get_text(strip=True)
+        if not href or not title:
+            return None
+        url = urljoin(base, href)
+
+        category = ""
+        cat_tag = article.select_one(".category_title a")
+        if cat_tag:
+            category = cat_tag.get_text(strip=True)
+
+        date = self._extract_date(article)
+
+        return {
+            "url": url,
+            "title": title,
+            "category": category,
+            "date": date,
+            "full_text": "",
+        }
 
     @staticmethod
     def _extract_date(article) -> str:
