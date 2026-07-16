@@ -193,7 +193,6 @@ class OpenAIRequest(BaseModel):
     messages: list[OpenAIMessage]
     stream: bool = False
     temperature: float | None = 0.7
-    max_tokens: int | None = 2048
 
 
 class OpenAICompletionUsage(BaseModel):
@@ -227,32 +226,6 @@ async def openai_models():
                 },
             ],
         }
-
-
-@app.post("/v1/embeddings")
-async def openai_embeddings(request: Request):
-    """Прокси для эмбеддингов в LiteLLM."""
-    import httpx
-
-    body = await request.json()
-    payload = {
-        # agent-service только проксирует /v1/embeddings к LiteLLM (где живёт mistral-embed).
-        # Эмбеддинги для базы знаний kb-service делает локально (deepvk/USER-bge-m3), см. kb-service.
-        "model": body.get("model", "mistral-embed"),
-        "input": body["input"],
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{settings.litellm_url}/v1/embeddings",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {settings.litellm_master_key}",
-                "Content-Type": "application/json",
-            },
-        )
-        response.raise_for_status()
-        return response.json()
 
 
 @app.post("/v1/chat/completions")

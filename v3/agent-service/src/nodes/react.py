@@ -174,7 +174,6 @@ async def _call_llm(prompt: str) -> str:
     payload = {
         "model": settings.model_priority[0],
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1024,
         "temperature": 0.3,
     }
 
@@ -189,7 +188,10 @@ async def _call_llm(prompt: str) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        answer = data["choices"][0]["message"]["content"]
+        if len(answer) > 1000:
+            answer = answer[:1000]
+        return answer
 
 
 def _extract_json(text: str) -> str:

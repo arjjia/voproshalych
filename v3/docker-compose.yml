@@ -170,8 +170,6 @@ services:
       AGENT_PORT: 8001
       LLM_API_BASE: http://litellm:4000/v1
       LLM_API_KEY: ${LITELLM_MASTER_KEY}
-      LLM_MODEL: deepseek-v4-flash-free
-      LLM_FALLBACK_MODEL: glm-5.2
     depends_on:
       kb-service:
         condition: service_started
@@ -193,7 +191,7 @@ services:
       APP_URL: ${APP_URL:-http://localhost:3210}
       OPENAI_API_KEY: sk-no-key-required
       OPENAI_PROXY_URL: http://agent-service:8001/v1
-      DEFAULT_AGENT_CONFIG: model=deepseek-v4-flash-free
+      DEFAULT_AGENT_CONFIG: model=voproshalych-v3
       FEATURE_FLAGS: "-welcome_suggest,-market,-dalle,-plugins,-knowledge_base,-speech_to_text,-ai_image,-changelog,-check_updates,-openai_api_key,-openai_proxy_url,-language_model_settings,-provider_settings,-create_session,-edit_agent,-import,-export,-share,-discover"
       SSRF_ALLOW_PRIVATE_IP_ADDRESS: "1"
       ENABLED_OPENAI: "0"

@@ -89,7 +89,6 @@ async def _call_classifier(prompt: str) -> str:
     payload = {
         "model": settings.model_priority[0],
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 128,
         "temperature": 0.1,
     }
 

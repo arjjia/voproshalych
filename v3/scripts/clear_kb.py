@@ -1,8 +1,6 @@
 """Очистка базы знаний: удаляет все чанки и эмбеддинги.
 
 Использование:
-  docker compose exec kb-service python /app/scripts/clear_kb.py
-  # или напрямую (если установлен psycopg2):
   python scripts/clear_kb.py --db-host localhost --db-port 5433
 
 Через psql (без Python):

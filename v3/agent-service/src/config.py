@@ -8,9 +8,6 @@ class Settings(BaseSettings):
 
     litellm_url: str = "http://litellm:4000"
     litellm_master_key: str = "sk-litellm-master-key-v3"
-    llm_model: str = "mistral-nemo"
-    classifier_model: str = "mistral-classifier"
-    embedding_model: str = "mistral-embed"
 
     # Приоритет моделей (первая доступная = самая приоритетная)
     model_priority: list[str] = [

@@ -12,8 +12,6 @@ class Settings(BaseSettings):
     litellm_master_key: str = "sk-litellm-master-key-v3"
     embedding_model: str = "deepvk/USER-bge-m3"
     top_k: int = 10
-    llm_model: str = "mistral-nemo"
-    classifier_model: str = "mistral-classifier"
 
     # Чанкинг (символы)
     max_chars: int = 500

@@ -79,7 +79,6 @@ async def _generate_final_answer(query: str, kb_context: str, dialog_context: st
     payload = {
         "model": settings.model_priority[0],
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 2048,
         "temperature": 0.7,
         "stream": False,
     }
@@ -95,7 +94,10 @@ async def _generate_final_answer(query: str, kb_context: str, dialog_context: st
         )
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        answer = data["choices"][0]["message"]["content"]
+        if len(answer) > 2000:
+            answer = answer[:2000]
+        return answer
 
 
 def _extract_text(content: list | str) -> str:

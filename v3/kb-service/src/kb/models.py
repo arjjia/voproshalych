@@ -42,7 +42,7 @@ class KBEmbedding(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     chunk_id = Column(String, ForeignKey("kb_chunks.id", ondelete="CASCADE"), nullable=False, unique=True)
     embedding = Column(Vector(1024), nullable=False)
-    model = Column(String(255), default="mistral-embed")
+    model = Column(String(255), default="deepvk/USER-bge-m3")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     chunk = relationship("KBChunk", back_populates="embedding")
