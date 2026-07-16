@@ -48,7 +48,6 @@ API-ключ: `MISTRAL_API_KEY` (в .env)
 |---|---|---|---|
 | `mistral-nemo` | open-mistral-nemo | 12B | $0.16 / $0.16 |
 | `mistral-classifier` | open-mistral-nemo (то же) | 12B | $0.16 / $0.16 |
-| `mistral-embed` | mistral-embed | 1024d | $0.04 / $0.04 |
 
 > **Важно:** `mistral-classifier` и `mistral-nemo` — одна и та же модель `open-mistral-nemo`.
 > В конфиге LiteLLM у `mistral-classifier` жёстко проставлены `temperature: 0.1`, `max_tokens: 512`.
@@ -87,9 +86,8 @@ API-ключ: `MISTRAL_API_KEY` (в .env)
 ## Модель для эмбеддингов
 
 | Роль | Модель | Размерность | Где запускается |
-|---|---|---|---|
-| Эмбеддинги БЗ | `deepvk/USER-bge-m3` (локально, SentenceTransformer) | 1024 | kb-service (in-process) |
-| Эмбеддинги через API | `mistral-embed` (через LiteLLM → Mistral API) | 1024 | agent-service (прокси) |
+|---|---|---|---|---|
+| Эмбеддинги | `deepvk/USER-bge-m3` (локально, SentenceTransformer) | 1024 | kb-service (in-process) |
 
 ---
 

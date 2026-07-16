@@ -11,7 +11,7 @@ graph TB
     User(["Пользователь"]) --> LobeChat["LobeChat v3 (:3210)<br/>Кастомный fork<br/>#00aeef брендинг"]
 
     subgraph AgentService["Agent Service (:8001)"]
-        FastAPI["FastAPI<br/>v1/chat/completions /chat /health<br/>/trace /mcp/tools"]
+        FastAPI["FastAPI<br/>/chat /chat/stream /v1/chat/completions<br/>/v1/models /health /trace /mcp/tools"]
         MW["UserIdentityMiddleware<br/>X-User-Id / X-User-Role"]
         LangGraph["LangGraph граф<br/>Supervisor → KB / Meta / ReAct / Clarify / OffTopic"]
         Traces["trace_logger<br/>JSON Lines /tmp/agent-traces"]
@@ -24,17 +24,13 @@ graph TB
     end
 
     subgraph LLM["LiteLLM Gateway (:4000)"]
-        LiteLLM["LiteLLM Proxy<br/>~15 моделей"]
-        Primary["deepseek-v4-flash-free<br/>Основная"]
-        Fallback["nemotron-ultra-free<br/>glm-5.2<br/>llama-70b-or<br/>+ 10 fallback"]
-        Classifier["nemotron-ultra-free<br/>Классификация t=0.1"]
-        Embed["mistral-embed<br/>Эмбеддинги dim=1024"]
+        LiteLLM["LiteLLM Proxy<br/>14 моделей"]
+        Primary["nemotron-ultra-free<br/>Основная + классификация t=0.1"]
+        Fallback["nemotron-super-or<br/>gpt-oss-or<br/>deepseek-v4-flash-free<br/>+ 9 fallback"]
         RedisCache["Redis Cache<br/>TTL: 3600с"]
 
         LiteLLM --> Primary
         LiteLLM --> Fallback
-        LiteLLM --> Classifier
-        LiteLLM --> Embed
         LiteLLM --> RedisCache
     end
 
@@ -42,7 +38,7 @@ graph TB
         KBS["kb-service (:8005)<br/>FastAPI JSON-RPC"]
         PG["PostgreSQL + pgvector<br/>Chunks → Embeddings dim=1024"]
         LocalEmbed["SentenceTransformer<br/>deepvk/USER-bge-m3<br/>Локально, dim=1024"]
-        Parsers["Парсеры<br/>Web / Utmn / News / Confluence<br/>Sveden / FAQ / Contacts"]
+        Parsers["Парсеры<br/>Web / News / Confluence<br/>Help / Study"]
 
         KBS --> LocalEmbed
         KBS --> PG
@@ -53,17 +49,11 @@ graph TB
         MCPKB["mcp-kb (:9010)<br/>Bridge → kb-service"]
         MCPNews["mcp-news (:9011)<br/>Новости/события"]
         MCPFetch["mcp-fetch (:9015)<br/>fetch_url (HTML→text)"]
-        MCPContacts["mcp-contacts (:9012)<br/>Контакты"]
-        MCPLib["mcp-library (:9013)<br/>Библиотека"]
-        MCPSv["mcp-sveden (:9014)<br/>Сведения об организации"]
     end
 
     subgraph Ext["Внешние источники"]
         UTMN_NEWS["utmn.ru/news/stories<br/>Новости"]
         UTMN_EVENTS["utmn.ru/news/events<br/>События"]
-        UTMN_CONTACTS["utmn.ru/kontakty<br/>Контакты"]
-        BMK["bmk.utmn.ru<br/>lib.utmn.ru<br/>Библиотека"]
-        SVEDEN["sveden.utmn.ru<br/>Сведения"]
         CONFL["Confluence<br/>Help + Study"]
     end
 
@@ -83,14 +73,11 @@ graph TB
     Bots -->|HTTP| FastAPI
 
     LangGraph -.->|LLM| LiteLLM
-    MCPClient --> MCPKB & MCPNews & MCPFetch & MCPContacts & MCPLib & MCPSv
+    MCPClient --> MCPKB & MCPNews & MCPFetch
     MCPKB -->|JSON-RPC| KBS
     MCPNews --> UTMN_NEWS
     MCPNews --> UTMN_EVENTS
     MCPFetch -->|HTTP| UTMN_NEWS & UTMN_EVENTS
-    MCPContacts --> UTMN_CONTACTS
-    MCPLib --> BMK
-    MCPSv --> SVEDEN
     KBS --> CONFL
     KBS -->|pgvector| PGSQL
     LiteLLM -->|cache| REDIS
@@ -103,14 +90,11 @@ graph TB
 |-----------|-----------|------|----------|
 | **LobeChat v3** | lobehub/lobe-chat (fork) | 3210 | Кастомный чат-интерфейс: pixel cat логотип, #00aeef, consent screen, auth email+password |
 | **agent-service** | FastAPI + LangGraph | 8001 | Оркестратор: классификация, маршрутизация, MCP-инструменты, трассировка |
-| **LiteLLM Gateway** | LiteLLM Proxy | 4000 | Прокси к ~15 LLM (OpenCode Zen + OpenRouter + Mistral) с fallback цепочками |
+| **LiteLLM Gateway** | LiteLLM Proxy | 4000 | Прокси к 14 LLM (OpenCode Zen + OpenRouter + Mistral) с fallback цепочками |
 | **kb-service** | FastAPI + SQLAlchemy | 8005 | База знаний: парсинг, чанкинг, локальные эмбеддинги (deepvk/USER-bge-m3), pgvector-поиск |
 | **mcp-kb** | Python FastMCP | 9010 | Bridge к kb-service через JSON-RPC |
 | **mcp-news** | Python FastMCP | 9011 | Парсинг новостей и событий с utmn.ru |
 | **mcp-fetch** | Python FastMCP | 9015 | Универсальный загрузчик URL (HTML → чистый текст) |
-| **mcp-contacts** | Python FastMCP | 9012 | Парсинг контактов utmn.ru |
-| **mcp-library** | Python FastMCP | 9013 | Информация о библиотеке (bmk.utmn.ru) |
-| **mcp-sveden** | Python FastMCP | 9014 | Сведения об организации (sveden.utmn.ru) |
 | **bot-vk** | Python | — | Бот для ВКонтакте |
 | **bot-max** | Python | — | Бот для Max (OnlinePatrol) |
 | **PostgreSQL** | PostgreSQL + pgvector + AGE | 5433 | Основная БД: документы, эмбеддинги, пользователи LobeChat |
@@ -131,15 +115,16 @@ start → supervisor (классификация интента через LLM)
 |--------|----------|
 | `kb_qa` | Вопрос про университет (правила, стипендии, факультеты...) |
 | `meta` | Вопрос про самого ассистента |
-| `tool_required` | Запрос, требующий MCP-инструментов (новости, контакты, библиотека...) |
+| `tool_required` | Запрос, требующий MCP-инструментов (новости, события, веб-страницы...) |
 | `clarify` | Неясный запрос — просим уточнить |
 | `off_topic` | Не по теме — вежливый отказ |
 
 ### LLM-модели (LiteLLM)
 
-Основная модель — **deepseek-v4-flash-free** (OpenCode Zen, бесплатно). При недоступности — автоматический fallback
-через 15 моделей (OpenRouter free, Mistral Nemo, GLM 5.2). Классификация — nemotron-ultra-free.
-Эмбеддинги: локально deepvk/USER-bge-m3 (dim=1024) в kb-service, mistral-embed (dim=1024) через LiteLLM для API.
+Основная модель — **nemotron-ultra-free** (Nvidia Nemotron 3 Ultra 550B, OpenCode Zen, бесплатно). При недоступности —
+автоматический fallback через 12 моделей (OpenRouter free, ZEN free, Mistral Nemo). Классификация и генерация
+используют первую доступную модель из приоритетного списка (`model_priority[0]`).
+Эмбеддинги: локально deepvk/USER-bge-m3 (dim=1024) в kb-service.
 
 ### Аутентификация (LobeHub Server-mode + Better Auth)
 
@@ -193,12 +178,6 @@ curl http://localhost:4000/health/readiness
 Если нужно перезаполнить базу знаний — удалить все чанки и эмбеддинги:
 
 ```bash
-docker compose exec kb-service python /app/scripts/clear_kb.py
-```
-
-Или через psql напрямую:
-
-```bash
 docker compose exec postgres psql -U voproshalych -d voproshalych \
   -c "TRUNCATE kb_embeddings CASCADE; TRUNCATE kb_chunks CASCADE;"
 ```
@@ -214,10 +193,15 @@ python scripts/clear_kb.py --db-host localhost --db-port 5433
 **Стандартные источники** (работают из Docker):
 
 ```bash
-# Краулинг utmn.ru (основные страницы)
+# Краулинг Confluence Help
 curl -X POST http://localhost:8005/api/v1/tools \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"crawl_utmn","params":{"base_url":"https://www.utmn.ru"},"id":1}'
+  -d '{"jsonrpc":"2.0","method":"crawl_confluence_help","params":{"source_url":"https://confluence.utmn.ru"},"id":1}'
+
+# Краулинг Confluence Study
+curl -X POST http://localhost:8005/api/v1/tools \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"crawl_confluence_study","params":{"source_url":"https://confluence.utmn.ru"},"id":1}'
 
 # Краулинг новостей
 curl -X POST http://localhost:8005/api/v1/tools \
@@ -228,16 +212,6 @@ curl -X POST http://localhost:8005/api/v1/tools \
 curl -X POST http://localhost:8005/api/v1/tools \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"crawl_utmn_events","params":{},"id":1}'
-
-# Краулинг FAQ
-curl -X POST http://localhost:8005/api/v1/tools \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"crawl_utmn_faq","params":{"source_url":"https://www.utmn.ru"},"id":1}'
-
-# Краулинг контактов
-curl -X POST http://localhost:8005/api/v1/tools \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"crawl_utmn_contacts","params":{"source_url":"https://www.utmn.ru/kontakty"},"id":1}'
 ```
 
 **Confluence** (запускать с хоста):
@@ -275,14 +249,9 @@ curl http://localhost:8001/v1/models
 curl -X POST http://localhost:8001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek-v4-flash-free",
+    "model": "voproshalych-v3",
     "messages": [{"role": "user", "content": "какие стипендии в тюмгу"}]
   }'
-
-# Эмбеддинги (через LiteLLM)
-curl -X POST http://localhost:8001/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{"model":"mistral-embed","input":"Тюменский государственный университет"}'
 ```
 
 ### Полезные команды
@@ -309,7 +278,7 @@ docker compose down -v
 ```
 v3/
 ├── .env                        # Переменные окружения
-├── docker-compose.yml          # Единый Compose (16 сервисов)
+├── docker-compose.yml          # Единый Compose (12 сервисов)
 ├── Makefile
 │
 ├── kb-service/                 # База знаний
@@ -324,8 +293,7 @@ v3/
 │       ├── search.py           # pgvector similarity search
 │       ├── preprocessing.py
 │       ├── tools.py            # crawl, search, store
-│       └── parsers/            # web, utmn, news, faq, contacts,
-│                               # sveden, confluence_help, confluence_study
+│       └── parsers/            # web, news, confluence_help, confluence_study
 │
 ├── agent-service/              # Оркестратор
 │   ├── Dockerfile
@@ -381,7 +349,7 @@ v3/
 │       └── init.sql
 │
 ├── litellm/
-│   └── config.yaml             # ~15 моделей + fallback chains + Redis
+│   └── config.yaml             # 14 моделей + fallback chains + Redis
 │
 ├── bot-vk/                     # Бот ВКонтакте
 ├── bot-max/                    # Бот Max (OnlinePatrol)
@@ -389,7 +357,8 @@ v3/
 └── scripts/
     ├── test.sh
     ├── test_curl.sh
-    └── crawl_confluence.py     # Confluence-парсер (с хоста)
+    ├── crawl_confluence.py       # Confluence-парсер (с хоста)
+    └── export_graph_mermaid.py   # Генерация Mermaid-диаграммы графа LangGraph
 ```
 
 ## Конфигурация
@@ -399,7 +368,7 @@ v3/
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|----------|
 | `ZEN_API_KEY` | — | API-ключ OpenCode Zen (основной, обязательно) |
-| `MISTRAL_API_KEY` | — | API-ключ Mistral (эмбеддинги, резерв) |
+| `MISTRAL_API_KEY` | — | API-ключ Mistral (резерв) |
 | `OPENROUTER_API_KEY` | — | API-ключ OpenRouter (резервные модели) |
 | `LITELLM_MASTER_KEY` | `sk-litellm-master-key-v3` | Мастер-ключ LiteLLM |
 | `AUTH_SECRET` | `changeme-auth-secret-v3` | Secret для JWT LobeChat |
@@ -420,9 +389,6 @@ v3/
 | Redis | 6380 | 6379 |
 | mcp-kb | 9010 | 9010 |
 | mcp-news | 9011 | 9011 |
-| mcp-contacts | 9012 | 9012 |
-| mcp-library | 9013 | 9013 |
-| mcp-sveden | 9014 | 9014 |
 | mcp-fetch | 9015 | 9015 |
 
 ## Тестирование
@@ -441,6 +407,19 @@ cd kb-service && uv run pytest -q    # 17 тестов
 cd mcp-servers && uv run pytest -q   # 17 тестов
 cd agent-service && uv run pytest -q  # 29 тестов
 ```
+
+## Граф агента (LangGraph)
+
+Сгенерировать Mermaid-диаграмму текущего графа агента (узлы, рёбра, условный
+роутинг) — скрипт читает `agent-service/src/graph.py` и экспортирует структуру
+графа в формате Mermaid:
+
+```bash
+cd agent-service && uv run python ../scripts/export_graph_mermaid.py
+```
+
+Результат: `docs/AGENT_GRAPH.mmd` — можно открыть в mermaid.live или VS Code
+(плагин Mermaid).
 
 ## Сети
 
