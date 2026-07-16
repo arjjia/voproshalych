@@ -86,6 +86,8 @@ services:
     build:
       context: ./kb-service
       dockerfile: Dockerfile
+      args:
+        HF_TOKEN: ${HF_TOKEN}
     container_name: v3-kb-service
     restart: unless-stopped
     ports:
@@ -223,6 +225,7 @@ services:
       - .env
     environment:
       BOT_CORE_URL: http://agent-service:8001
+      BOT_CORE_TIMEOUT_SECONDS: "60"
     depends_on:
       - agent-service
     networks:
@@ -238,6 +241,7 @@ services:
       - .env
     environment:
       BOT_CORE_URL: http://agent-service:8001
+      BOT_CORE_TIMEOUT_SECONDS: "60"
     depends_on:
       - agent-service
     networks:

@@ -33,7 +33,8 @@ ENV HF_HOME="/hf-cache"
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 # Предзагрузка модели deepvk/USER-bge-m3 при сборке
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('deepvk/USER-bge-m3'); print('model preloaded')" \
+ARG HF_TOKEN
+RUN HF_TOKEN=${HF_TOKEN} python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('deepvk/USER-bge-m3'); print('model preloaded')" \
     || echo "WARN: model preload skipped"
 
 RUN pip install --no-cache-dir "pytest>=8.0.0" "pytest-asyncio>=0.24.0"

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class MCPClient:
     """HTTP-клиент для MCP-сервера (JSON-RPC over SSE transport)."""
 
-    def __init__(self, base_url: str, timeout: int = 30):
+    def __init__(self, base_url: str, timeout: int = 60):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 
