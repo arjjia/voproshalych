@@ -103,8 +103,6 @@ COPY voproshalych_v2/v3/assets/icon-192x192.png /app/public/icons/icon-192x192.p
 COPY voproshalych_v2/v3/assets/icon-192x192.maskable.png /app/public/icons/icon-192x192.maskable.png
 COPY voproshalych_v2/v3/assets/icon-512x512.png /app/public/icons/icon-512x512.png
 COPY voproshalych_v2/v3/assets/icon-512x512.maskable.png /app/public/icons/icon-512x512.maskable.png
-COPY voproshalych_v2/v3/assets/logo.svg /app/public/logo.svg
-COPY voproshalych_v2/v3/assets/logo-icon.svg /app/public/logo-icon.svg
 COPY voproshalych_v2/v3/lobe-chat/custom.js /app/public/custom.js
 COPY voproshalych_v2/v3/lobe-chat/consent.html /app/public/consent.html
 
