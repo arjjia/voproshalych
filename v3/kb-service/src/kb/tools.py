@@ -71,6 +71,20 @@ TOOLS = [
         },
     },
     {
+        "name": "store_parsed_document",
+        "description": "Сохранить предварительно распарсенный документ в базу знаний. URL не перезапрашивается, текст используется как есть.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Заголовок документа"},
+                "text_content": {"type": "string", "description": "Текстовое содержимое документа"},
+                "url": {"type": "string", "description": "URL документа"},
+                "source_type": {"type": "string", "description": "Тип источника"},
+            },
+            "required": ["title", "text_content", "url", "source_type"],
+        },
+    },
+    {
         "name": "crawl_confluence_help",
         "description": "Сканировать Confluence Help space. Извлекает страницы и сохраняет в базу знаний.",
         "inputSchema": {
@@ -365,6 +379,19 @@ async def store_document(url: str, source_type: str) -> dict:
     return await _store_parsed_document(parsed)
 
 
+async def store_parsed_document(
+    title: str, text_content: str, url: str, source_type: str,
+) -> dict:
+    """Store a pre-parsed document in the knowledge base (no re-fetch)."""
+    doc = ParsedDocument(
+        url=url,
+        title=title,
+        text_content=text_content,
+        source_type=source_type,
+    )
+    return await _store_parsed_document(doc)
+
+
 async def crawl_confluence_help(source_url: str) -> dict:
     """Crawl Confluence Help space."""
     _log_separator("Источник: Confluence Help")
@@ -464,6 +491,7 @@ TOOL_FUNCTIONS = {
     "classify_query": classify_query,
     "kb_search_classified": kb_search_classified,
     "store_document": store_document,
+    "store_parsed_document": store_parsed_document,
     "crawl_confluence_help": crawl_confluence_help,
     "crawl_confluence_study": crawl_confluence_study,
     "crawl_utmn_news": crawl_utmn_news,

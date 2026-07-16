@@ -70,19 +70,30 @@ def get_headers() -> dict:
     return headers
 
 
-def store_in_kb(url: str, source_type: str) -> bool:
-    """Call kb-service to store a parsed document."""
+def store_in_kb(url: str, source_type: str, title: str = "", text: str = "") -> bool:
+    """Call kb-service to store a document.
+
+    If title+text are provided, sends them directly as pre-parsed content
+    (avoids re-fetching the URL without auth headers).
+    Otherwise, kb-service will fetch and parse the URL.
+    """
+    if title and text:
+        method = "store_parsed_document"
+        params = {"title": title, "text_content": text, "url": url, "source_type": source_type}
+    else:
+        method = "store_document"
+        params = {"url": url, "source_type": source_type}
     payload = {
         "jsonrpc": "2.0",
-        "method": "store_document",
-        "params": {"url": url, "source_type": source_type},
+        "method": method,
+        "params": params,
         "id": 1,
     }
     try:
         resp = httpx.post(
             f"{KB_SERVICE_URL}/api/v1/tools",
             json=payload,
-            timeout=30,
+            timeout=300,
         )
         data = resp.json()
         result = data.get("result", {})
@@ -127,8 +138,9 @@ def crawl_help():
         logger.info(f"  → {title} ({page_id})")
         result = fetch_page_html(page_id)
         if result:
+            text, title_text = result
             page_url = f"{CONFLUENCE_HOST}/pages/viewpage.action?pageId={page_id}"
-            if store_in_kb(page_url, "confluence_help"):
+            if store_in_kb(page_url, "confluence_help", title=title_text, text=text):
                 count += 1
     logger.info(f"Help: {count} documents stored")
     return count
@@ -167,7 +179,8 @@ def crawl_study():
                 logger.info(f"  → {title} ({page_id})")
                 page_result = fetch_page_html(page_id)
                 if page_result:
-                    if store_in_kb(page_url, "confluence_study"):
+                    text, title_text = page_result
+                    if store_in_kb(page_url, "confluence_study", title=title_text, text=text):
                         count += 1
                 else:
                     logger.info("    SKIP (empty or error)")

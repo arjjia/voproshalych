@@ -201,16 +201,6 @@ docker compose logs -f kb-service
 Затем в первом терминале выполните краулинг:
 
 ```bash
-# Краулинг Confluence Help
-curl -X POST http://localhost:8005/api/v1/tools \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"crawl_confluence_help","params":{"source_url":"https://confluence.utmn.ru"},"id":1}'
-
-# Краулинг Confluence Study
-curl -X POST http://localhost:8005/api/v1/tools \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"crawl_confluence_study","params":{"source_url":"https://confluence.utmn.ru"},"id":1}'
-
 # Краулинг новостей
 curl -X POST http://localhost:8005/api/v1/tools \
   -H "Content-Type: application/json" \

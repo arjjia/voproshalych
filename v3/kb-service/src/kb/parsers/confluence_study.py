@@ -46,6 +46,10 @@ class ConfluenceStudyParser(BaseParser):
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, headers=self._headers, params=params)
             response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            if "application/json" not in content_type:
+                logger.warning("Non-JSON response for page %s (Content-Type: %s) — possible auth redirect", page_id, content_type)
+                return {}
             return response.json()
 
     async def _parse_page_html(
