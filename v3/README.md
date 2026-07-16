@@ -24,7 +24,7 @@ graph TB
     end
 
     subgraph LLM["LiteLLM Gateway (:4000)"]
-        LiteLLM["LiteLLM Proxy<br/>14 моделей"]
+        LiteLLM["LiteLLM Proxy<br/>13 моделей"]
         Primary["nemotron-ultra-free<br/>Основная + классификация t=0.1"]
         Fallback["nemotron-super-or<br/>gpt-oss-or<br/>deepseek-v4-flash-free<br/>+ 9 fallback"]
         RedisCache["Redis Cache<br/>TTL: 3600с"]
@@ -347,7 +347,7 @@ v3/
 │       └── init.sql
 │
 ├── litellm/
-│   └── config.yaml             # 14 моделей + fallback chains + Redis
+│   └── config.yaml             # 13 моделей + fallback chains + Redis
 │
 ├── bot-vk/                     # Бот ВКонтакте
 ├── bot-max/                    # Бот Max (OnlinePatrol)

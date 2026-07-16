@@ -16,7 +16,6 @@ class Settings(BaseSettings):
         "gpt-oss-or",
         "deepseek-v4-flash-free",
         "llama-70b-or",
-        "glm-5.2",
         "qwen-coder-or",
         "gemma-31b-or",
         "hy3-free",

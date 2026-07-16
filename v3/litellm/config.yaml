@@ -67,19 +67,6 @@ model_list:
       mode: chat
 
   # ═══════════════════════════════════════════════
-  #  PRIORITY 6 — Zhipu GLM 5.2 (ZEN paid cheap, сильный reasoning)
-  # ═══════════════════════════════════════════════
-
-  - model_name: glm-5.2
-    litellm_params:
-      model: openai/glm-5.2
-      api_key: os.environ/ZEN_API_KEY
-      api_base: https://opencode.ai/zen/v1
-      max_tokens: 4096
-    model_info:
-      mode: chat
-
-  # ═══════════════════════════════════════════════
   #  PRIORITY 7 — Qwen3 Coder 33B (OpenRouter free)
   # ═══════════════════════════════════════════════
 
@@ -195,8 +182,6 @@ fallbacks:
   - deepseek-v4-flash-free: [nemotron-ultra-free, hy3-free, llama-70b-or]
   # Priority 5 → 4, 2, 3
   - llama-70b-or: [deepseek-v4-flash-free, nemotron-super-or, gpt-oss-or]
-  # Priority 6 → 4, 11, 1
-  - glm-5.2: [deepseek-v4-flash-free, mistral-nemo, nemotron-ultra-free]
   # Priority 7 → 4, 1, 8
   - qwen-coder-or: [deepseek-v4-flash-free, nemotron-ultra-free, gemma-31b-or]
   # Priority 8 → 4, 9, 11
@@ -205,8 +190,8 @@ fallbacks:
   - hy3-free: [deepseek-v4-flash-free, nemotron-ultra-free, llama-70b-or]
   # Priority 10 → 4, 9, 8
   - mimo-free: [deepseek-v4-flash-free, hy3-free, gemma-31b-or]
-  # Priority 11 → 4, 6, 1
-  - mistral-nemo: [deepseek-v4-flash-free, glm-5.2, nemotron-ultra-free]
+  # Priority 11 → 4, 1
+  - mistral-nemo: [deepseek-v4-flash-free, nemotron-ultra-free]
   # Priority 12 → 7, 4, 1
   - code-free: [qwen-coder-or, deepseek-v4-flash-free, nemotron-ultra-free]
   # Priority 13 → 4, 1
