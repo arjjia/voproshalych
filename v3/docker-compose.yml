@@ -94,8 +94,10 @@ services:
       - .env
     volumes:
       - ../scripts:/app/scripts
+      - hf-cache:/hf-cache
     environment:
       KB_PORT: 8004
+      HF_HUB_OFFLINE: "1"
     depends_on:
       postgres:
         condition: service_healthy
@@ -243,6 +245,7 @@ services:
 
 volumes:
   postgres_data:
+  hf-cache:
 
 networks:
   v3-net:
