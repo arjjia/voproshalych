@@ -1,0 +1,162 @@
+flowchart TB
+    %% Styles
+    classDef admin fill:#F3E5F5,stroke:#7B1FA2,stroke-width:3px,color:#4A148C
+    classDef bot fill:#E1F5FE,stroke:#01579B,stroke-width:3px,color:#01579B
+    classDef core fill:#B3E5FC,stroke:#0277BD,stroke-width:3px,color:#0277BD
+    classDef adapt fill:#E0F7FA,stroke:#006064,stroke-width:3px,color:#004D40
+    classDef models fill:#FFF3E0,stroke:#E65100,stroke-width:2px,color:#E65100
+    classDef services fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px,color:#7B1FA2
+    classDef api fill:#E8F5E9,stroke:#1B5E20,stroke-width:2px,color:#1B5E20
+    classDef kb fill:#F1F8E9,stroke:#33691E,stroke-width:3px,color:#33691E
+    classDef parser fill:#DCEDC8,stroke:#558B2F,stroke-width:1px,color:#33691E
+    classDef llm fill:#FFF8E1,stroke:#F57F17,stroke-width:3px,color:#F57F17
+    classDef provider fill:#FFECB3,stroke:#FF8F00,stroke-width:1px,color:#F57F17
+    classDef infra fill:#E0F2F1,stroke:#004D40,stroke-width:3px,color:#004D40
+    classDef prompt fill:#FCE4EC,stroke:#880E4F,stroke-width:2px,color:#880E4F
+    classDef script fill:#F5F5F5,stroke:#616161,stroke-width:2px,color:#424242
+    classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:3px,color:#F57F17
+    classDef client fill:#ECEFF1,stroke:#546E7A,stroke-width:3px,color:#263238
+    classDef storage fill:#FFEBEE,stroke:#C62828,stroke-width:3px,color:#B71C1C
+
+    %% ==============================
+    %% ПОЛЬЗОВАТЕЛИ
+    %% ==============================
+    subgraph Users["👤 Пользователи"]
+        STUDENT["Студент<br/>браузер · VK · TG · MAX"]:::client
+        ADMIN["Администратор<br/>Сотрудник Единого Деканата"]:::client
+    end
+
+    %% ==============================
+    %% ADMIN-SERVICE
+    %% ==============================
+    subgraph AdminService["🐳 admin-service"]
+        ADM_DASH["admin-panel :8002<br/>Streamlit дашборд"]:::admin
+        ADM_API["api :8003<br/>FastAPI админ-роуты"]:::admin
+    end
+
+    %% ==============================
+    %% BOT-SERVICE
+    %% ==============================
+    subgraph BotService["🐳 bot-service"]
+        subgraph Adapters["bots/ — Платформенные адаптеры"]
+            TG["telegram/<br/>aiogram long-polling"]:::adapt
+            VK["vk/<br/>vkbottle long-polling"]:::adapt
+            MX["max/<br/>Go API client + HTTP :8081"]:::adapt
+        end
+
+        subgraph Core["core/ :8000"]
+            CORE_MODELS["models<br/>Pydantic схемы<br/>IncomingMessage, CallbackEvent, BotResponse"]:::models
+            CORE_SRV["Services<br/>Бизнес-логика<br/>BotService, DialogService, UserService, FeedbackService, QAServiceClient, HolidayNewsletterService"]:::services
+        end
+
+        CORE_DB[(PostgreSQL<br/>users, sessions, dialog_messages<br/>questions_answers, holidays<br/>subscriptions, telemetry_logs)]:::storage
+    end
+
+    %% ==============================
+    %% QA-SERVICE
+    %% ==============================
+    subgraph QAService["🐳 qa-service :8004"]
+        QA_API["api<br/>FastAPI routes<br/>POST /qa, POST /qa/holiday, GET /health, GET /health/ready, POST /kb/documents, GET /kb/health, GET /kb/stats"]:::api
+
+        QA_SRV["Services<br/>Хелперы пайплайна<br/>question_router, payload_builder, response_processor"]:::services
+
+        QA_MODELS["models<br/>Pydantic схемы<br/>QARequest, QAResponse, HolidayGreetingRequest, HolidayGreetingResponse, HealthResponse"]:::models
+
+        subgraph QA_KB["kb — База Знаний"]
+            KB_PARSERS["parsers<br/>Загрузчики документов<br/>ConfluenceHelpParser, ConfluenceStudyParser, SvedenParser, UtmnParser, UtmnFaqParser, UtmnContactsParser, WebPageParser"]:::parser
+            KB_EMB["embedding<br/>SentenceTransformer bge-m3"]:::kb
+            KB_RR["reranker<br/>BGE-reranker (отключён)"]:::kb
+            KB_CFG["config<br/>KBConfig"]:::kb
+        end
+
+        subgraph QA_LLM["llm — Пул LLM провайдеров"]
+            LLM_PROV["providers<br/>MistralProvider, OpenRouterProvider, GigaChatProvider, OllamaProvider"]:::provider
+            LLM_CFG["config<br/>LLMConfig"]:::llm
+            LLM_POOL["pool<br/>LLMPool"]:::llm
+        end
+
+        LA["lightrag_adapter<br/>Мост к LightRAG<br/>override_lightrag_prompts, sentence_aware_chunking, llm_model_func, _embedding_func, create_lightrag_instance, _patch_merge_chunks"]:::infra
+
+        FILL["fill_kb_unified.py<br/>ETL скрипт заполнения БЗ"]:::script
+
+        PROMPTS["config/prompts.py<br/>Системные промпты для LLM"]:::prompt
+    end
+
+    %% ==============================
+    %% ВНЕШНИЕ ИСТОЧНИКИ
+    %% ==============================
+    subgraph External["🌐 Внешние источники"]
+        EXTSRC["Источники (веб-страницы)<br/>Confluence, sveden.utmn.ru, utmn.ru<br/>FAQ абитуриента, Контакты"]:::external
+        LLM_EXT["LLM провайдеры<br/>Mistral, OpenRouter, GigaChat, Ollama"]:::external
+    end
+
+    %% ==============================
+    %% БАЗА ДАННЫХ
+    %% ==============================
+    DB["🐳 postgres :5433<br/>PostgreSQL 17 · pgvector"]:::storage
+
+    %% ==============================
+    %% СВЯЗИ
+    %% ==============================
+    %% Пользователи → сервисы
+    ADMIN --> ADM_API
+    STUDENT --> TG
+    STUDENT --> VK
+    STUDENT --> MX
+
+    %% Админка
+    ADM_DASH --> ADM_API
+    ADM_API --> DB
+
+    %% Адаптеры → core
+    TG -.-> CORE_SRV
+    VK -.-> CORE_SRV
+    MX -.-> CORE_SRV
+
+    %% Core → DB
+    CORE_SRV --> CORE_DB
+
+    %% Core → QA
+    QSC -- "POST /qa" --> QA_API
+
+    %% QA API → Services
+    QA_API --> QA_SRV
+    QA_API --> PROMPTS
+    QA_API --> LA
+
+    %% QA Services → LLM
+    QA_SRV --> LLM_POOL
+    PROMPTS -.-> QA_SRV
+    LA --> LLM_POOL
+    LA --> KB_EMB
+
+    %% QA → KB
+    QA_API --> FILL
+    FILL --> KB_PARSERS
+    FILL --> LA
+    KB_PARSERS --> KB_EMB
+
+    %% LLM fallback
+    LLM_POOL --> LLM_PROV
+    LLM_POOL --> LLM_CFG
+
+    %% QA → DB
+    LA --> DB
+    QA_API --> DB
+
+    %% Внешние
+    KB_PARSERS --> EXTSRC
+    LLM_PROV --> LLM_EXT
+    FILL --> EXTSRC
+
+    %% Стили
+    class TG,VK,MX adapt
+    class CORE_MODELS,QA_MODELS models
+    class CORE_SRV,QA_SRV services
+    class QA_API api
+    class KB_PARSERS,KB_EMB,KB_RR,KB_CFG kb
+    class LLM_PROV,LLM_CFG,LLM_POOL llm
+    class LA,FILL,DB infra
+    class PROMPTS prompt
+    class EXTSRC,LLM_EXT external
+    class STUDENT,ADMIN client
