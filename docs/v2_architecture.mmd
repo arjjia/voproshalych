@@ -1,18 +1,46 @@
+%%{
+  init: {
+    'theme': 'base',
+    'themeVariables': {
+      'background': '#011B3A',
+      'primaryColor': '#032B50',
+      'primaryTextColor': '#FFFFFF',
+      'primaryBorderColor': '#046CE0',
+      'lineColor': '#FFFFFF',
+      'secondaryColor': '#021E39',
+      'tertiaryColor': '#021E39',
+      'clusterBkg': '#011B3A',
+      'clusterBorder': '#0357D2',
+      'nodeBorder': '#046CE0',
+      'nodeTextColor': '#FFFFFF',
+      'edgeLabelBackground': '#032B50',
+      'edgeLabelColor': '#FFFFFF',
+      'titleColor': '#FFFFFF',
+      'fontFamily': 'Aptos, sans-serif'
+    },
+    'flowchart': {
+      'htmlLabels': true,
+      'curve': 'basis',
+      'padding': 12
+    }
+  }
+}%%
+
 flowchart TB
     %% Styles
-    classDef admin fill:#F3E5F5,stroke:#7B1FA2,stroke-width:3px,color:#4A148C
-    classDef bot fill:#E1F5FE,stroke:#01579B,stroke-width:3px,color:#01579B
-    classDef core fill:#B3E5FC,stroke:#0277BD,stroke-width:3px,color:#0277BD
+    classDef admin fill:#EDE7F6,stroke:#7B1FA2,stroke-width:3px,color:#4A148C
+    classDef bot fill:#E3F2FD,stroke:#01579B,stroke-width:3px,color:#0D47A1
+    classDef core fill:#B3E5FC,stroke:#0277BD,stroke-width:3px,color:#01579B
     classDef adapt fill:#E0F7FA,stroke:#006064,stroke-width:3px,color:#004D40
-    classDef models fill:#FFF3E0,stroke:#E65100,stroke-width:2px,color:#E65100
-    classDef services fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px,color:#7B1FA2
-    classDef api fill:#E8F5E9,stroke:#1B5E20,stroke-width:2px,color:#1B5E20
-    classDef kb fill:#F1F8E9,stroke:#33691E,stroke-width:3px,color:#33691E
-    classDef parser fill:#DCEDC8,stroke:#558B2F,stroke-width:1px,color:#33691E
-    classDef llm fill:#FFF8E1,stroke:#F57F17,stroke-width:3px,color:#F57F17
-    classDef provider fill:#FFECB3,stroke:#FF8F00,stroke-width:1px,color:#F57F17
-    classDef infra fill:#E0F2F1,stroke:#004D40,stroke-width:3px,color:#004D40
-    classDef prompt fill:#FCE4EC,stroke:#880E4F,stroke-width:2px,color:#880E4F
+    classDef models fill:#E3F2FD,stroke:#E65100,stroke-width:2px,color:#0D47A1
+    classDef services fill:#E8F5E9,stroke:#C4F1FB,stroke-width:2px,color:#1B5E20
+    classDef api fill:#B3E5FC,stroke:#046CE0,stroke-width:2px,color:#01579B
+    classDef kb fill:#E8F5E9,stroke:#33691E,stroke-width:3px,color:#1B5E20
+    classDef parser fill:#F1F8E9,stroke:#558B2F,stroke-width:1px,color:#33691E
+    classDef llm fill:#FFF3E0,stroke:#F57F17,stroke-width:3px,color:#E65100
+    classDef provider fill:#F3E5F5,stroke:#FF8F00,stroke-width:1px,color:#4A148C
+    classDef infra fill:#ECEFF1,stroke:#AAAAAA,stroke-width:3px,color:#37474F
+    classDef prompt fill:#FFF8E1,stroke:#FFDE9F,stroke-width:2px,color:#3E2723
     classDef script fill:#F5F5F5,stroke:#616161,stroke-width:2px,color:#424242
     classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:3px,color:#F57F17
     classDef client fill:#ECEFF1,stroke:#546E7A,stroke-width:3px,color:#263238
@@ -44,7 +72,7 @@ flowchart TB
             MX["max/<br/>Go API client + HTTP :8081"]:::adapt
         end
 
-        subgraph Core["core/ :8000"]
+        subgraph Core["core/ :8000 — Бизнес-логика"]
             CORE_MODELS["models<br/>Pydantic схемы<br/>IncomingMessage, CallbackEvent, BotResponse"]:::models
             CORE_SRV["Services<br/>Бизнес-логика<br/>BotService, DialogService, UserService, FeedbackService, QAServiceClient, HolidayNewsletterService"]:::services
         end
@@ -98,65 +126,42 @@ flowchart TB
     %% ==============================
     %% СВЯЗИ
     %% ==============================
-    %% Пользователи → сервисы
     ADMIN --> ADM_API
     STUDENT --> TG
     STUDENT --> VK
     STUDENT --> MX
 
-    %% Админка
     ADM_DASH --> ADM_API
     ADM_API --> DB
 
-    %% Адаптеры → core
     TG -.-> CORE_SRV
     VK -.-> CORE_SRV
     MX -.-> CORE_SRV
 
-    %% Core → DB
     CORE_SRV --> CORE_DB
 
-    %% Core → QA
     QSC -- "POST /qa" --> QA_API
 
-    %% QA API → Services
     QA_API --> QA_SRV
     QA_API --> PROMPTS
     QA_API --> LA
 
-    %% QA Services → LLM
     QA_SRV --> LLM_POOL
     PROMPTS -.-> QA_SRV
     LA --> LLM_POOL
     LA --> KB_EMB
 
-    %% QA → KB
     QA_API --> FILL
     FILL --> KB_PARSERS
     FILL --> LA
     KB_PARSERS --> KB_EMB
 
-    %% LLM fallback
     LLM_POOL --> LLM_PROV
     LLM_POOL --> LLM_CFG
 
-    %% QA → DB
     LA --> DB
     QA_API --> DB
 
-    %% Внешние
     KB_PARSERS --> EXTSRC
     LLM_PROV --> LLM_EXT
     FILL --> EXTSRC
-
-    %% Стили
-    class TG,VK,MX adapt
-    class CORE_MODELS,QA_MODELS models
-    class CORE_SRV,QA_SRV services
-    class QA_API api
-    class KB_PARSERS,KB_EMB,KB_RR,KB_CFG kb
-    class LLM_PROV,LLM_CFG,LLM_POOL llm
-    class LA,FILL,DB infra
-    class PROMPTS prompt
-    class EXTSRC,LLM_EXT external
-    class STUDENT,ADMIN client
