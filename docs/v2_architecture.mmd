@@ -29,20 +29,20 @@
 flowchart TB
     %% Styles
     classDef admin fill:#EDE7F6,stroke:#7B1FA2,stroke-width:3px,color:#4A148C
-    classDef bot fill:#E3F2FD,stroke:#01579B,stroke-width:3px,color:#0D47A1
-    classDef core fill:#B3E5FC,stroke:#0277BD,stroke-width:3px,color:#01579B
+    classDef ui fill:#D1C4E9,stroke:#7B1FA2,stroke-width:3px,color:#311B92
     classDef adapt fill:#E0F7FA,stroke:#006064,stroke-width:3px,color:#004D40
-    classDef models fill:#E3F2FD,stroke:#E65100,stroke-width:2px,color:#0D47A1
+    classDef core fill:#B3E5FC,stroke:#0277BD,stroke-width:3px,color:#01579B
     classDef services fill:#E8F5E9,stroke:#C4F1FB,stroke-width:2px,color:#1B5E20
     classDef api fill:#B3E5FC,stroke:#046CE0,stroke-width:2px,color:#01579B
-    classDef kb fill:#E8F5E9,stroke:#33691E,stroke-width:3px,color:#1B5E20
+    classDef models fill:#E3F2FD,stroke:#E65100,stroke-width:2px,color:#0D47A1
     classDef parser fill:#F1F8E9,stroke:#558B2F,stroke-width:1px,color:#33691E
-    classDef llm fill:#FFF3E0,stroke:#F57F17,stroke-width:3px,color:#E65100
+    classDef kb fill:#E8F5E9,stroke:#33691E,stroke-width:2px,color:#1B5E20
+    classDef llm fill:#FFF3E0,stroke:#F57F17,stroke-width:2px,color:#E65100
     classDef provider fill:#F3E5F5,stroke:#FF8F00,stroke-width:1px,color:#4A148C
-    classDef infra fill:#ECEFF1,stroke:#AAAAAA,stroke-width:3px,color:#37474F
+    classDef infra fill:#ECEFF1,stroke:#AAAAAA,stroke-width:2px,color:#37474F
     classDef prompt fill:#FFF8E1,stroke:#FFDE9F,stroke-width:2px,color:#3E2723
     classDef script fill:#F5F5F5,stroke:#616161,stroke-width:2px,color:#424242
-    classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:3px,color:#F57F17
+    classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#F57F17
     classDef client fill:#ECEFF1,stroke:#546E7A,stroke-width:3px,color:#263238
     classDef storage fill:#FFEBEE,stroke:#C62828,stroke-width:3px,color:#B71C1C
 
@@ -55,11 +55,20 @@ flowchart TB
     end
 
     %% ==============================
-    %% ADMIN-SERVICE
+    %% ADMIN
     %% ==============================
-    subgraph AdminService["🐳 admin-service"]
-        ADM_DASH["admin-panel :8002<br/>Streamlit дашборд"]:::admin
-        ADM_API["api :8003<br/>FastAPI админ-роуты"]:::admin
+    subgraph Admin["🐳 Администрирование"]
+        ADM_UI["admin-ui<br/>React SPA<br/>pages, components, api"]:::ui
+
+        subgraph AdmSvc["admin-service :8003"]
+            ADM_ROUTES["api/routes/<br/>FastAPI роуты<br/>health, qa, stats, tasks, users"]:::api
+            ADM_AUTH["auth.py<br/>Аутентификация"]:::admin
+            ADM_CONFIG["config.py<br/>Конфигурация"]:::admin
+            ADM_DB["db.py<br/>Подключение к БД"]:::admin
+            ADM_MAIN["main.py<br/>FastAPI приложение"]:::admin
+            ADM_QUERIES["queries.py<br/>SQL запросы"]:::admin
+            ADM_SCHEMAS["schemas.py<br/>Pydantic схемы"]:::models
+        end
     end
 
     %% ==============================
@@ -67,24 +76,22 @@ flowchart TB
     %% ==============================
     subgraph BotService["🐳 bot-service"]
         subgraph Adapters["bots/ — Платформенные адаптеры"]
-            TG["telegram/<br/>aiogram long-polling"]:::adapt
-            VK["vk/<br/>vkbottle long-polling"]:::adapt
-            MX["max/<br/>Go API client + HTTP :8081"]:::adapt
+            TG["telegram/<br/>TG адаптер<br/>aiogram long-polling"]:::adapt
+            VK["vk/<br/>VK адаптер<br/>vkbottle long-polling"]:::adapt
+            MX["max/<br/>MAX адаптер<br/>Go API client + HTTP :8081"]:::adapt
         end
 
-        subgraph Core["core/ :8000 — Бизнес-логика"]
+        subgraph BotCore["core/ :8000 — Бизнес-логика"]
             CORE_MODELS["models<br/>Pydantic схемы<br/>IncomingMessage, CallbackEvent, BotResponse"]:::models
             CORE_SRV["Services<br/>Бизнес-логика<br/>BotService, DialogService, UserService, FeedbackService, QAServiceClient, HolidayNewsletterService"]:::services
         end
-
-        CORE_DB[(PostgreSQL<br/>users, sessions, dialog_messages<br/>questions_answers, holidays<br/>subscriptions, telemetry_logs)]:::storage
     end
 
     %% ==============================
     %% QA-SERVICE
     %% ==============================
     subgraph QAService["🐳 qa-service :8004"]
-        QA_API["api<br/>FastAPI routes<br/>POST /qa, POST /qa/holiday, GET /health, GET /health/ready, POST /kb/documents, GET /kb/health, GET /kb/stats"]:::api
+        QA_API["api<br/>FastAPI роуты<br/>POST /qa, /qa/holiday, /health, /health/ready, POST /kb/documents, GET /kb/health, GET /kb/stats"]:::api
 
         QA_SRV["Services<br/>Хелперы пайплайна<br/>question_router, payload_builder, response_processor"]:::services
 
@@ -92,13 +99,13 @@ flowchart TB
 
         subgraph QA_KB["kb — База Знаний"]
             KB_PARSERS["parsers<br/>Загрузчики документов<br/>ConfluenceHelpParser, ConfluenceStudyParser, SvedenParser, UtmnParser, UtmnFaqParser, UtmnContactsParser, WebPageParser"]:::parser
-            KB_EMB["embedding<br/>SentenceTransformer bge-m3"]:::kb
-            KB_RR["reranker<br/>BGE-reranker (отключён)"]:::kb
+            KB_EMB["embedding<br/>Эмбеддинги bge-m3"]:::kb
+            KB_RR["reranker<br/>Реранкер (отключён)"]:::kb
             KB_CFG["config<br/>KBConfig"]:::kb
         end
 
-        subgraph QA_LLM["llm — Пул LLM провайдеров"]
-            LLM_PROV["providers<br/>MistralProvider, OpenRouterProvider, GigaChatProvider, OllamaProvider"]:::provider
+        subgraph QA_LLM["llm — Пул LLM"]
+            LLM_PROV["providers<br/>Провайдеры LLM<br/>MistralProvider, OpenRouterProvider, GigaChatProvider, OllamaProvider"]:::provider
             LLM_CFG["config<br/>LLMConfig"]:::llm
             LLM_POOL["pool<br/>LLMPool"]:::llm
         end
@@ -107,7 +114,14 @@ flowchart TB
 
         FILL["fill_kb_unified.py<br/>ETL скрипт заполнения БЗ"]:::script
 
-        PROMPTS["config/prompts.py<br/>Системные промпты для LLM"]:::prompt
+        PROMPTS["config/prompts.py<br/>Системные промпты"]:::prompt
+    end
+
+    %% ==============================
+    %% ХРАНИЛИЩЕ
+    %% ==============================
+    subgraph Storage["💾 Хранилище"]
+        DB["postgres :5433<br/>PostgreSQL 17 · pgvector"]:::storage
     end
 
     %% ==============================
@@ -119,48 +133,49 @@ flowchart TB
     end
 
     %% ==============================
-    %% БАЗА ДАННЫХ
-    %% ==============================
-    DB["🐳 postgres :5433<br/>PostgreSQL 17 · pgvector"]:::storage
-
-    %% ==============================
     %% СВЯЗИ
     %% ==============================
-    ADMIN --> ADM_API
+    ADMIN --> ADM_UI
+    ADM_UI --> ADM_MAIN
+    ADM_MAIN --> ADM_AUTH
+    ADM_MAIN --> ADM_CONFIG
+    ADM_MAIN --> ADM_DB
+    ADM_MAIN --> ADM_ROUTES
+    ADM_MAIN --> ADM_QUERIES
+    ADM_MAIN --> ADM_SCHEMAS
+    ADM_DB --> DB
+
     STUDENT --> TG
     STUDENT --> VK
     STUDENT --> MX
 
-    ADM_DASH --> ADM_API
-    ADM_API --> DB
+    TG --> CORE_SRV
+    VK --> CORE_SRV
+    MX --> CORE_SRV
+    CORE_SRV --> CORE_MODELS
+    CORE_SRV --> DB
 
-    TG -.-> CORE_SRV
-    VK -.-> CORE_SRV
-    MX -.-> CORE_SRV
-
-    CORE_SRV --> CORE_DB
-
-    QSC -- "POST /qa" --> QA_API
+    CORE_SRV --> QA_API
 
     QA_API --> QA_SRV
+    QA_API --> QA_MODELS
     QA_API --> PROMPTS
     QA_API --> LA
+    QA_API --> FILL
+    QA_API --> DB
 
     QA_SRV --> LLM_POOL
     PROMPTS -.-> QA_SRV
     LA --> LLM_POOL
     LA --> KB_EMB
+    LA --> DB
 
-    QA_API --> FILL
     FILL --> KB_PARSERS
     FILL --> LA
     KB_PARSERS --> KB_EMB
 
     LLM_POOL --> LLM_PROV
     LLM_POOL --> LLM_CFG
-
-    LA --> DB
-    QA_API --> DB
 
     KB_PARSERS --> EXTSRC
     LLM_PROV --> LLM_EXT
