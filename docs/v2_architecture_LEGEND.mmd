@@ -41,6 +41,7 @@ flowchart TB
   classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#F57F17
   classDef client fill:#ECEFF1,stroke:#546E7A,stroke-width:3px,color:#263238
   classDef storage fill:#FFEBEE,stroke:#C62828,stroke-width:3px,color:#B71C1C
+  classDef migrate fill:#E0E0E0,stroke:#757575,stroke-width:2px,color:#424242
 
   subgraph Legend["📋 Легенда — v2 архитектура"]
 
@@ -51,11 +52,13 @@ flowchart TB
       L4["bot-service/bots/*<br/>Бот-адаптер"]:::adapt
       L5["qa-service :8004<br/>QA-сервис"]:::api
       L6["postgres :5433<br/>Хранилище"]:::storage
+      L7["db-migrate<br/>Миграции"]:::migrate
       L1 --- L2
       L2 --- L3
       L3 --- L4
       L4 --- L5
       L5 --- L6
+      L6 --- L7
     end
 
     subgraph Modules["🧩 Модули внутри сервисов"]

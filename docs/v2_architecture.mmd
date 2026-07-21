@@ -44,6 +44,7 @@ flowchart TB
     classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#F57F17
     classDef client fill:#ECEFF1,stroke:#546E7A,stroke-width:3px,color:#263238
     classDef storage fill:#FFEBEE,stroke:#C62828,stroke-width:3px,color:#B71C1C
+    classDef migrate fill:#E0E0E0,stroke:#757575,stroke-width:2px,color:#424242
 
     %% ==============================
     %% ПОЛЬЗОВАТЕЛИ
@@ -57,14 +58,14 @@ flowchart TB
     %% ADMIN
     %% ==============================
     subgraph Admin["🐳 Администрирование"]
-        ADM_UI["admin-ui<br/>React SPA<br/>pages, components, api"]:::ui
+        ADM_UI["admin-ui<br/>React интерфейс<br/>pages, components, api"]:::ui
 
-        subgraph AdmSvc["admin-service :8003"]
+        subgraph AdmSvc["admin-service :8003 — FastAPI админка"]
+            ADM_MAIN["main.py<br/>FastAPI приложение"]:::admin
             ADM_ROUTES["api/routes/<br/>FastAPI роуты<br/>health, qa, stats, tasks, users"]:::api
             ADM_AUTH["auth.py<br/>Аутентификация"]:::admin
             ADM_CONFIG["config.py<br/>Конфигурация"]:::admin
             ADM_DB["db.py<br/>Подключение к БД"]:::admin
-            ADM_MAIN["main.py<br/>FastAPI приложение"]:::admin
             ADM_QUERIES["queries.py<br/>SQL запросы"]:::admin
             ADM_SCHEMAS["schemas.py<br/>Pydantic схемы"]:::models
         end
@@ -100,13 +101,13 @@ flowchart TB
             KB_PARSERS["parsers<br/>Загрузчики документов<br/>ConfluenceHelpParser, ConfluenceStudyParser, SvedenParser, UtmnParser, UtmnFaqParser, UtmnContactsParser, WebPageParser"]:::parser
             KB_EMB["embedding<br/>Эмбеддинги bge-m3"]:::kb
             KB_RR["reranker<br/>Реранкер (отключён)"]:::kb
-            KB_CFG["config<br/>KBConfig"]:::kb
+            KB_CFG["config<br/>Конфиг БЗ<br/>KBConfig"]:::kb
         end
 
         subgraph QA_LLM["llm — Пул LLM"]
             LLM_PROV["providers<br/>Провайдеры LLM<br/>MistralProvider, OpenRouterProvider, GigaChatProvider, OllamaProvider"]:::provider
-            LLM_CFG["config<br/>LLMConfig"]:::llm
-            LLM_POOL["pool<br/>LLMPool"]:::llm
+            LLM_CFG["config<br/>Конфиг LLM<br/>LLMConfig"]:::llm
+            LLM_POOL["pool<br/>Пул LLM<br/>LLMPool"]:::llm
         end
 
         LA["lightrag_adapter<br/>Мост к LightRAG<br/>override_lightrag_prompts, sentence_aware_chunking, llm_model_func, _embedding_func, create_lightrag_instance, _patch_merge_chunks"]:::infra
@@ -120,7 +121,8 @@ flowchart TB
     %% ХРАНИЛИЩЕ
     %% ==============================
     subgraph Storage["💾 Хранилище"]
-        DB["postgres :5433<br/>PostgreSQL 17 · pgvector"]:::storage
+        DB["postgres :5433<br/>PostgreSQL 17 · pgvector<br/>users, sessions, messages, questions_answers, chunks, embeddings, subscriptions, holidays, telemetry_logs, agent_traces, admin_tasks, admin_task_reports, admin_task_report_items"]:::storage
+        DBM["db-migrate<br/>Миграции Alembic"]:::migrate
     end
 
     %% ==============================
@@ -161,6 +163,7 @@ flowchart TB
     QA_API --> PROMPTS
     QA_API --> LA
     QA_API --> FILL
+    QA_API --> KB_CFG
     QA_API --> DB
 
     QA_SRV --> LLM_POOL
@@ -179,3 +182,5 @@ flowchart TB
     KB_PARSERS --> EXTSRC
     LLM_PROV --> LLM_EXT
     FILL --> EXTSRC
+
+    DBM --> DB
