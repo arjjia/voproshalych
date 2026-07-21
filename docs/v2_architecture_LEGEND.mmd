@@ -13,7 +13,8 @@
       'clusterBorder': '#0357D2',
       'nodeBorder': '#046CE0',
       'nodeTextColor': '#FFFFFF',
-      'titleColor': '#FFFFFF'
+      'titleColor': '#FFFFFF',
+      'fontFamily': 'Aptos, sans-serif'
     },
     'flowchart': {
       'htmlLabels': true,
@@ -24,13 +25,14 @@
 
 flowchart TB
 
-  classDef admin fill:#EDE7F6,stroke:#7B1FA2,stroke-width:3px,color:#4A148C
   classDef ui fill:#D1C4E9,stroke:#7B1FA2,stroke-width:3px,color:#311B92
-  classDef adapt fill:#E0F7FA,stroke:#006064,stroke-width:3px,color:#004D40
+  classDef admin fill:#EDE7F6,stroke:#7B1FA2,stroke-width:3px,color:#4A148C
   classDef core fill:#B3E5FC,stroke:#0277BD,stroke-width:3px,color:#01579B
-  classDef services fill:#E8F5E9,stroke:#C4F1FB,stroke-width:2px,color:#1B5E20
+  classDef adapt fill:#E0F7FA,stroke:#006064,stroke-width:3px,color:#004D40
   classDef api fill:#B3E5FC,stroke:#046CE0,stroke-width:2px,color:#01579B
-  classDef models fill:#E3F2FD,stroke:#E65100,stroke-width:2px,color:#0D47A1
+  classDef services fill:#E8F5E9,stroke:#C4F1FB,stroke-width:2px,color:#1B5E20
+  classDef storage fill:#FFEBEE,stroke:#C62828,stroke-width:3px,color:#B71C1C
+  classDef migrate fill:#E0E0E0,stroke:#757575,stroke-width:2px,color:#424242
   classDef parser fill:#F1F8E9,stroke:#558B2F,stroke-width:1px,color:#33691E
   classDef kb fill:#E8F5E9,stroke:#33691E,stroke-width:2px,color:#1B5E20
   classDef llm fill:#FFF3E0,stroke:#F57F17,stroke-width:2px,color:#E65100
@@ -38,55 +40,34 @@ flowchart TB
   classDef infra fill:#ECEFF1,stroke:#AAAAAA,stroke-width:2px,color:#37474F
   classDef prompt fill:#FFF8E1,stroke:#FFDE9F,stroke-width:2px,color:#3E2723
   classDef script fill:#F5F5F5,stroke:#616161,stroke-width:2px,color:#424242
-  classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#F57F17
   classDef client fill:#ECEFF1,stroke:#546E7A,stroke-width:3px,color:#263238
-  classDef storage fill:#FFEBEE,stroke:#C62828,stroke-width:3px,color:#B71C1C
-  classDef migrate fill:#E0E0E0,stroke:#757575,stroke-width:2px,color:#424242
+  classDef external fill:#FFFDE7,stroke:#F9A825,stroke-width:2px,color:#F57F17
 
   subgraph Legend["📋 Легенда — v2 архитектура"]
+    direction LR
 
-    subgraph Docker["🐳 Docker-контейнеры"]
-      L1["admin-ui<br/>React SPA"]:::ui
+    subgraph Col1["🐳 Docker-контейнеры"]
+      L1["admin-ui<br/>React интерфейс"]:::ui
       L2["admin-service :8003<br/>FastAPI админка"]:::admin
       L3["bot-service/core/ :8000<br/>Бизнес-логика"]:::core
       L4["bot-service/bots/*<br/>Бот-адаптер"]:::adapt
       L5["qa-service :8004<br/>QA-сервис"]:::api
       L6["postgres :5433<br/>Хранилище"]:::storage
       L7["db-migrate<br/>Миграции"]:::migrate
-      L1 --- L2
-      L2 --- L3
-      L3 --- L4
-      L4 --- L5
-      L5 --- L6
-      L6 --- L7
     end
 
-    subgraph Modules["🧩 Модули внутри сервисов"]
-      M1["api/routes/<br/>FastAPI роуты"]:::api
-      M2["Services<br/>Хелперы"]:::services
-      M3["models<br/>Pydantic схемы"]:::models
-      M4["parsers<br/>Загрузчики"]:::parser
-      M5["kb<br/>База Знаний"]:::kb
-      M6["llm<br/>Пул LLM"]:::llm
-      M7["providers<br/>Провайдеры"]:::provider
-      M8["lightrag_adapter<br/>Инфра"]:::infra
-      M9["config/prompts.py<br/>Промпты"]:::prompt
-      M10["fill_kb_unified.py<br/>Скрипт"]:::script
-      M1 --- M2
-      M2 --- M3
-      M3 --- M4
-      M4 --- M5
-      M5 --- M6
-      M6 --- M7
-      M7 --- M8
-      M8 --- M9
-      M9 --- M10
-    end
-
-    subgraph Other["Остальные элементы"]
-      O1["Браузер · VK · TG · MAX<br/>Клиент"]:::client
-      O2["Confluence · utmn.ru<br/>Внешний источник"]:::external
-      O1 --- O2
+    subgraph Col2["🧩 Модули и элементы"]
+      R1["api/routes/<br/>FastAPI роуты"]:::api
+      R2["Services<br/>Хелперы"]:::services
+      R3["parsers<br/>Загрузчики"]:::parser
+      R4["kb<br/>База Знаний"]:::kb
+      R5["llm<br/>Пул LLM"]:::llm
+      R6["providers<br/>Провайдеры"]:::provider
+      R7["lightrag_adapter<br/>Инфра"]:::infra
+      R8["config/prompts.py<br/>Промпты"]:::prompt
+      R9["fill_kb_unified.py<br/>Скрипт"]:::script
+      R10["Браузер · VK · TG · MAX<br/>Клиент"]:::client
+      R11["Confluence · utmn.ru<br/>Внешний источник"]:::external
     end
 
   end

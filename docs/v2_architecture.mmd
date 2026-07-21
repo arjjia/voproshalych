@@ -67,7 +67,6 @@ flowchart TB
             ADM_CONFIG["config.py<br/>Конфигурация"]:::admin
             ADM_DB["db.py<br/>Подключение к БД"]:::admin
             ADM_QUERIES["queries.py<br/>SQL запросы"]:::admin
-            ADM_SCHEMAS["schemas.py<br/>Pydantic схемы"]:::models
         end
     end
 
@@ -82,7 +81,6 @@ flowchart TB
         end
 
         subgraph BotCore["core/ :8000 — Бизнес-логика"]
-            CORE_MODELS["models<br/>Pydantic схемы<br/>IncomingMessage, CallbackEvent, BotResponse"]:::models
             CORE_SRV["Services<br/>Бизнес-логика<br/>BotService, DialogService, UserService, FeedbackService, QAServiceClient, HolidayNewsletterService"]:::services
         end
     end
@@ -94,8 +92,6 @@ flowchart TB
         QA_API["api<br/>FastAPI роуты<br/>POST /qa, /qa/holiday, /health, /health/ready, POST /kb/documents, GET /kb/health, GET /kb/stats"]:::api
 
         QA_SRV["Services<br/>Хелперы пайплайна<br/>question_router, payload_builder, response_processor"]:::services
-
-        QA_MODELS["models<br/>Pydantic схемы<br/>QARequest, QAResponse, HolidayGreetingRequest, HolidayGreetingResponse, HealthResponse"]:::models
 
         subgraph QA_KB["kb — База Знаний"]
             KB_PARSERS["parsers<br/>Загрузчики документов<br/>ConfluenceHelpParser, ConfluenceStudyParser, SvedenParser, UtmnParser, UtmnFaqParser, UtmnContactsParser, WebPageParser"]:::parser
@@ -121,7 +117,7 @@ flowchart TB
     %% ХРАНИЛИЩЕ
     %% ==============================
     subgraph Storage["💾 Хранилище"]
-        DB["postgres :5433<br/>PostgreSQL 17 · pgvector<br/>users, sessions, messages, questions_answers, chunks, embeddings, subscriptions, holidays, telemetry_logs, agent_traces, admin_tasks, admin_task_reports, admin_task_report_items"]:::storage
+        DB["postgres :5433<br/>PostgreSQL 17 · pgvector + AGE<br/>Схемы: public (voproshalych + LightRAG), ag_catalog (AGE)"]:::storage
         DBM["db-migrate<br/>Миграции Alembic"]:::migrate
     end
 
@@ -143,7 +139,6 @@ flowchart TB
     ADM_MAIN --> ADM_DB
     ADM_MAIN --> ADM_ROUTES
     ADM_MAIN --> ADM_QUERIES
-    ADM_MAIN --> ADM_SCHEMAS
     ADM_DB --> DB
 
     STUDENT --> TG
@@ -153,13 +148,11 @@ flowchart TB
     TG --> CORE_SRV
     VK --> CORE_SRV
     MX --> CORE_SRV
-    CORE_SRV --> CORE_MODELS
     CORE_SRV --> DB
 
     CORE_SRV --> QA_API
 
     QA_API --> QA_SRV
-    QA_API --> QA_MODELS
     QA_API --> PROMPTS
     QA_API --> LA
     QA_API --> FILL
